@@ -370,6 +370,8 @@ source "drivers/gpu/drm/v3d/Kconfig"
 
 source "drivers/gpu/drm/vc4/Kconfig"
 
+source "drivers/gpu/drm/visualizefx/Kconfig"
+
 source "drivers/gpu/drm/etnaviv/Kconfig"
 
 source "drivers/gpu/drm/hisilicon/Kconfig"

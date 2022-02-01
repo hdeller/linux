@@ -1,0 +1,13 @@
+config DRM_VISUALIZEFX
+	tristate "DRM Support for HP Visualize FX cards"
+	depends on DRM
+	depends on PARISC
+	select DRM_KMS_HELPER
+	select DRM_KMS_CMA_HELPER
+	select DRM_GEM_SHMEM_HELPER
+	select RATIONAL
+	select VT_HW_CONSOLE_BINDING if FRAMEBUFFER_CONSOLE
+	help
+	  Choose this option for DRM support for the HP Visualize
+	  FX cards commonly found in PA-RISC machines.
+	  If M is selected the module will be called visualizefx.
