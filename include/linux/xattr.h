@@ -82,6 +82,7 @@ static inline const char *xattr_prefix(const struct xattr_handler *handler)
 struct simple_xattrs {
 	struct list_head head;
 	spinlock_t lock;
+	int count;
 };
 
 struct simple_xattr {
@@ -98,6 +99,7 @@ static inline void simple_xattrs_init(struct simple_xattrs *xattrs)
 {
 	INIT_LIST_HEAD(&xattrs->head);
 	spin_lock_init(&xattrs->lock);
+	xattrs->count = 0;
 }
 
 /*
@@ -111,6 +113,17 @@ static inline void simple_xattrs_free(struct simple_xattrs *xattrs)
 		kfree(xattr->name);
 		kvfree(xattr);
 	}
+	xattrs->count = 0;
+}
+
+static inline int simple_xattrs_count(struct simple_xattrs *xattrs)
+{
+	int ret;
+
+	spin_lock(&xattrs->lock);
+	ret = xattrs->count;
+	spin_unlock(&xattrs->lock);
+	return ret;
 }
 
 struct simple_xattr *simple_xattr_alloc(const void *value, size_t size);
