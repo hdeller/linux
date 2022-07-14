@@ -3315,6 +3315,30 @@ static int shmem_xattr_handler_set(const struct xattr_handler *handler,
 	return err;
 }
 
+static int shmem_xattr_handler_set_user(const struct xattr_handler *handler, struct user_namespace *ns,
+				   struct dentry *unused, struct inode *inode,
+				   const char *name, const void *value,
+				   size_t size, int flags)
+{
+	struct shmem_inode_info *info = SHMEM_I(inode);
+	struct shmem_sb_info *sbinfo = SHMEM_SB(inode->i_sb);
+
+	if (value) {
+		if (size > 8192)
+			return -EINVAL;
+		if (simple_xattrs_count(&info->xattrs) >= sbinfo->max_inodes)
+			return -ENOSPC;
+	}
+	name = xattr_full_name(handler, name);
+	return simple_xattr_set(&info->xattrs, name, value, size, flags, NULL);
+}
+
+static const struct xattr_handler shmem_user_xattr_handler = {
+	.prefix = XATTR_USER_PREFIX,
+	.get = shmem_xattr_handler_get,
+	.set = shmem_xattr_handler_set_user,
+};
+
 static const struct xattr_handler shmem_security_xattr_handler = {
 	.prefix = XATTR_SECURITY_PREFIX,
 	.get = shmem_xattr_handler_get,
@@ -3332,6 +3356,7 @@ static const struct xattr_handler *shmem_xattr_handlers[] = {
 	&posix_acl_access_xattr_handler,
 	&posix_acl_default_xattr_handler,
 #endif
+	&shmem_user_xattr_handler,
 	&shmem_security_xattr_handler,
 	&shmem_trusted_xattr_handler,
 	NULL

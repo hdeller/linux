@@ -1091,6 +1091,7 @@ int simple_xattr_set(struct simple_xattrs *xattrs, const char *name,
 				if (removed_size)
 					*removed_size = xattr->size;
 			} else {
+				--xattrs->count;
 				list_del(&xattr->list);
 				if (removed_size)
 					*removed_size = xattr->size;
@@ -1103,6 +1104,7 @@ int simple_xattr_set(struct simple_xattrs *xattrs, const char *name,
 		err = -ENODATA;
 	} else {
 		list_add(&new_xattr->list, &xattrs->head);
+		xattrs->count++;
 		xattr = NULL;
 	}
 out:
@@ -1185,5 +1187,6 @@ void simple_xattr_list_add(struct simple_xattrs *xattrs,
 {
 	spin_lock(&xattrs->lock);
 	list_add(&new_xattr->list, &xattrs->head);
+	xattrs->count++;
 	spin_unlock(&xattrs->lock);
 }
