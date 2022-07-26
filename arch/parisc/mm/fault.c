@@ -19,6 +19,7 @@
 #include <linux/uaccess.h>
 #include <linux/hugetlb.h>
 #include <linux/perf_event.h>
+#include <linux/sched/mm.h>
 
 #include <asm/traps.h>
 
@@ -230,6 +231,146 @@ const char *trap_name(unsigned long code)
 }
 
 /*
+ * If the user used setproctitle(), we just get the string from
+ * user space at arg_start, and limit it to a maximum of one page.
+ */
+static ssize_t get_mm_proctitle(struct mm_struct *mm,
+				size_t count, unsigned long pos,
+				unsigned long arg_start)
+{
+	char *page;
+	int ret, got;
+
+	if (pos >= PAGE_SIZE)
+		return 0;
+
+	page = (char *)__get_free_page(GFP_KERNEL);
+	if (!page)
+		return -ENOMEM;
+
+	ret = 0;
+	got = access_remote_vm(mm, arg_start, page, PAGE_SIZE, FOLL_ANON);
+	if (got > 0) {
+		int len = strnlen(page, got);
+
+		/* Include the NUL character if it was found */
+		if (0 && len < got)
+			len++;
+
+		if (len > pos) {
+			len -= pos;
+			if (len > count)
+				len = count;
+			pr_cont("%.*s", len, page+pos);
+			ret = len;
+		}
+	}
+	free_page((unsigned long)page);
+	return ret;
+}
+
+static ssize_t get_mm_cmdline(struct mm_struct *mm, size_t count)
+{
+	unsigned long arg_start, arg_end, env_start, env_end;
+	unsigned long pos, len;
+	char *page, c;
+
+	/* Check if process spawned far enough to have cmdline. */
+	if (!mm->env_end)
+		return 0;
+
+	spin_lock(&mm->arg_lock);
+	arg_start = mm->arg_start;
+	arg_end = mm->arg_end;
+	env_start = mm->env_start;
+	env_end = mm->env_end;
+	spin_unlock(&mm->arg_lock);
+
+	if (arg_start >= arg_end)
+		return 0;
+
+	/*
+	 * We allow setproctitle() to overwrite the argument
+	 * strings, and overflow past the original end. But
+	 * only when it overflows into the environment area.
+	 */
+	if (env_start != arg_end || env_end < env_start)
+		env_start = env_end = arg_end;
+	len = env_end - arg_start;
+
+	/* We're not going to care if "*ppos" has high bits set */
+	pos = 0;
+	if (pos >= len)
+		return 0;
+	if (count > len - pos)
+		count = len - pos;
+	if (!count)
+		return 0;
+
+	/*
+	 * Magical special case: if the argv[] end byte is not
+	 * zero, the user has overwritten it with setproctitle(3).
+	 *
+	 * Possible future enhancement: do this only once when
+	 * pos is 0, and set a flag in the 'struct file'.
+	 */
+	if (access_remote_vm(mm, arg_end-1, &c, 1, FOLL_ANON) == 1 && c)
+		return get_mm_proctitle(mm, count, pos, arg_start);
+
+	/*
+	 * For the non-setproctitle() case we limit things strictly
+	 * to the [arg_start, arg_end[ range.
+	 */
+	pos += arg_start;
+	if (pos < arg_start || pos >= arg_end)
+		return 0;
+	if (count > arg_end - pos)
+		count = arg_end - pos;
+
+	page = (char *)__get_free_page(GFP_KERNEL);
+	if (!page)
+		return -ENOMEM;
+
+	// limit to one page: (HELGE)
+	count = min_t(size_t, PAGE_SIZE, count);
+
+	len = 0;
+	while (count) {
+		int got;
+		int i;
+		size_t size = min_t(size_t, PAGE_SIZE, count);
+
+		got = access_remote_vm(mm, pos, page, size, FOLL_ANON);
+		if (got <= 0)
+			break;
+		for (i = got - 1; i >= 0; i--)
+			if (page[i] == 0)
+				page[i] = ' ';
+		pr_cont("%s", page);
+		pos += got;
+		len += got;
+		count -= got;
+	}
+
+	free_page((unsigned long)page);
+	return len;
+}
+
+static void print_task_cmdline(struct task_struct *tsk)
+{
+	struct mm_struct *mm;
+
+	mm = get_task_mm(tsk);
+	if (!mm)
+		return;
+
+	pr_warn("command line: ");
+	get_mm_cmdline(mm, PAGE_SIZE);
+	pr_cont("\n");
+	mmput(mm);
+}
+
+/*
  * Print out info about fatal segfaults, if the show_unhandled_signals
  * sysctl is set:
  */
@@ -255,6 +396,8 @@ show_signal_msg(struct pt_regs *regs, unsigned long code,
 	if (vma)
 		pr_cont(" vm_start = 0x%08lx, vm_end = 0x%08lx\n",
 			vma->vm_start, vma->vm_end);
+
+	print_task_cmdline(tsk);
 
 	show_regs(regs);
 }
