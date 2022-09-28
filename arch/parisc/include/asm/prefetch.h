@@ -17,28 +17,21 @@
 #define __ASM_PARISC_PREFETCH_H
 
 #ifndef __ASSEMBLY__
-#ifdef CONFIG_PREFETCH
-
+#if defined(CONFIG_PREFETCH) && !defined(CONFIG_64BIT)
+#include <asm/alternative.h>
 #define ARCH_HAS_PREFETCH
+#define ARCH_HAS_PREFETCHW
+#define prefetchw	prefetch
 static inline void prefetch(const void *addr)
 {
 	__asm__(
-#ifndef CONFIG_PA20
 		/* Need to avoid prefetch of NULL on PA7300LC */
-		"	extrw,u,= %0,31,32,%%r0\n"
-#endif
-		"	ldw 0(%0), %%r0" : : "r" (addr));
+		"	extrw,u,= %0, 31-12, 32-12, %%r0\n"
+		ALTERNATIVE(ALT_COND_RUN_ON_QEMU, INSN_NOP)
+		"	ldw 0(%0), %%r0\n"
+		ALTERNATIVE(ALT_COND_RUN_ON_QEMU, INSN_NOP)
+		: : "r" (addr));
 }
-
-/* LDD is a PA2.0 addition. */
-#ifdef CONFIG_PA20
-#define ARCH_HAS_PREFETCHW
-static inline void prefetchw(const void *addr)
-{
-	__asm__("ldd 0(%0), %%r0" : : "r" (addr));
-}
-#endif /* CONFIG_PA20 */
-
 #endif /* CONFIG_PREFETCH */
 #endif /* __ASSEMBLY__ */
 
