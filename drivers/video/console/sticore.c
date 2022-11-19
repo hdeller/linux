@@ -4,7 +4,7 @@
  *	core code for console driver using HP's STI firmware
  *
  *	Copyright (C) 2000 Philipp Rumpf <prumpf@tux.org>
- *	Copyright (C) 2001-2020 Helge Deller <deller@gmx.de>
+ *	Copyright (C) 2001-2022 Helge Deller <deller@gmx.de>
  *	Copyright (C) 2001-2002 Thomas Bogendoerfer <tsbogend@alpha.franken.de>
  * 
  * TODO:
@@ -1148,7 +1148,7 @@ int sti_call(const struct sti_struct *sti, unsigned long func,
 	return ret;
 }
 
-#if defined(CONFIG_FB_STI)
+#if defined(CONFIG_FB_STI) || defined(FB_VISUALIZEFX)
 /* check if given fb_info is the primary device */
 int fb_is_primary_device(struct fb_info *info)
 {
