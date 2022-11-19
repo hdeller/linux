@@ -1940,6 +1940,7 @@ quiet_cmd_depmod = DEPMOD  $(MODLIB)
 modules_install:
 	$(Q)$(MAKE) -f $(srctree)/scripts/Makefile.modinst
 	$(call cmd,depmod)
+	rm -f /lib/modules/$(KERNELRELEASE)/build /lib/modules/$(KERNELRELEASE)/source
 
 else # CONFIG_MODULES
 
