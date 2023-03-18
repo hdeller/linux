@@ -212,6 +212,8 @@ static int visfx_setcmap(struct fb_cmap *cmap, struct fb_info *info)
 {
 	unsigned int i;
 
+	return 0;
+
 	visfx_writel(info, B2_LLCA, cmap->start);
 
 	for (i = 0; i < cmap->len; i++) {
@@ -949,7 +951,7 @@ static int __init visfx_init_device(struct pci_dev *pdev, struct sti_struct *sti
 
 printk("MODE OPTION %s\n", mode_option);
 printk("visfxfb 111  %dx%d-%d frame buffer device\n", info->var.xres, info->var.yres, info->var.bits_per_pixel);
-	if (0 && mode_option &&
+	if (mode_option &&
 	    fb_find_mode(&info->var, info, mode_option, NULL, 0, NULL, 24))
 		if (visfx_check_var(&info->var, info) == 0)
 			visfx_set_par(info);
@@ -1003,7 +1005,7 @@ static int visfx_probe_pci(struct pci_dev *pdev,
 	return visfx_init_device(pdev, NULL);
 }
 
-static void __init visfx_probe_sti(struct sti_struct *sti)
+static void visfx_probe_sti(struct sti_struct *sti, int enable)
 {
 	if (!sti || !sti->pd)
 		return;
@@ -1011,7 +1013,19 @@ static void __init visfx_probe_sti(struct sti_struct *sti)
 	if (sti->graphics_id[0] != VISFX_CARDTYPE_FX5)
 		return;
 
-	visfx_init_device(sti->pd, sti);
+	if (enable)
+		visfx_init_device(sti->pd, sti);
+	else {
+		struct fb_info *info;
+		struct visfx_par *par;
+
+		info = pci_get_drvdata(sti->pd);
+		par = info->par;
+		pci_iounmap(sti->pd, par->reg_base);
+		fb_dealloc_cmap(&info->cmap);
+		unregister_framebuffer(info);
+		framebuffer_release(info);
+	}
 }
 
 static int __init visfx_options(char *options)
@@ -1063,13 +1077,19 @@ static int __init visfx_init(void)
 
 	if (IS_ENABLED(CONFIG_STI_CONSOLE) || IS_ENABLED(CONFIG_FB_STI))
 		for (i = 1; i <= MAX_STI_ROMS; i++)
-			visfx_probe_sti(sti_get_rom(i));
+			visfx_probe_sti(sti_get_rom(i), 1);
 
 	return pci_register_driver(&visfx_driver);
 }
 
 static void __exit visfx_exit(void)
 {
+	int i;
+
+	if (IS_ENABLED(CONFIG_STI_CONSOLE) || IS_ENABLED(CONFIG_FB_STI))
+		for (i = 1; i <= MAX_STI_ROMS; i++)
+			visfx_probe_sti(sti_get_rom(i), 0);
+
 	pci_unregister_driver(&visfx_driver);
 }
 
