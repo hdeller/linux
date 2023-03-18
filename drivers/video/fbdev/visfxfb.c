@@ -258,18 +258,19 @@ static void visfx_get_video_mode(struct fb_info *info)
 		var->sync |= FB_SYNC_VERT_HIGH_ACT;
 
 	var->red.length = 8;
-	var->red.offset = 16;
+	var->red.offset = 8;
 	var->green.length = 8;
-	var->green.offset = 8;
+	var->green.offset = 16;
 	var->blue.length = 8;
-	var->blue.offset = 0;
+	var->blue.offset = 24;
 	var->transp.length = 8;
-	var->transp.offset = 24;
+	var->transp.offset = 0;
+
 	var->bits_per_pixel = 32;
 	var->grayscale = 0;
 	var->xres_virtual = var->xres;
 	var->yres_virtual = var->yres;
-	info->screen_size = 2048 * var->yres;
+	info->screen_size = 2048 * var->yres * 32/8;
 }
 
 static int visfx_wait_pll(struct fb_info *info)
@@ -458,6 +459,7 @@ printk("visfx_open  %d  user %d\n", par->open_count, user);
 		visfx_writel(info, B2_DBA, BIN_ADD | B2_DBA_OTC(0) | B2_DBA_D /* Seite 352 */ | B2_DBA_DIRECT);
 		visfx_writel(info, B2_SBA, BIN_ADD | B2_DBA_OTC(0));
 		visfx_writel(info, B2_IPM, 0x00ffffff); // keine A-Mask
+		visfx_writel(info, B2_IPM, 0xffffff); // mit A-Mask
 	}
 
 	return 0;
@@ -945,12 +947,16 @@ static int __init visfx_init_device(struct pci_dev *pdev, struct sti_struct *sti
 	if (ret)
 		goto err_out_free;
 
-	if (mode_option &&
+printk("MODE OPTION %s\n", mode_option);
+printk("visfxfb 111  %dx%d-%d frame buffer device\n", info->var.xres, info->var.yres, info->var.bits_per_pixel);
+	if (0 && mode_option &&
 	    fb_find_mode(&info->var, info, mode_option, NULL, 0, NULL, 24))
 		if (visfx_check_var(&info->var, info) == 0)
 			visfx_set_par(info);
+printk("visfxfb 222  %dx%d-%d frame buffer device\n", info->var.xres, info->var.yres, info->var.bits_per_pixel);
 
 	visfx_get_video_mode(info);
+printk("visfxfb 333  %dx%d-%d frame buffer device\n", info->var.xres, info->var.yres, info->var.bits_per_pixel);
 	info->var.accel_flags = info->flags;
 
 	ret = fb_alloc_cmap(&info->cmap, NR_PALETTE, 0);

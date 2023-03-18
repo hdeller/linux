@@ -3952,6 +3952,7 @@
 #define B2_DBA_OTC(x)		((x) << 24)
 #define B2_DBA_P		(1 << 9)
 #define B2_DBA_S		(1 << 10)
+#define B2_DBA_D		(1 << 11)
 
 #define UB_CP_CURSOR_ENABLE            0x80000000
 #endif
