@@ -458,9 +458,9 @@ printk("visfx_open  %d  user %d\n", par->open_count, user);
 		// BIN_8F (#7) mounten?  siehe Seite 338
 		#define BIN_8F	7	/* ARGB888 */
 		#define BIN_ADD	(BIN_8F << 16)
-		visfx_writel(info, B2_DBA, BIN_ADD | B2_DBA_OTC(0) | B2_DBA_D /* Seite 352 */ | B2_DBA_DIRECT);
+		visfx_writel(info, B2_DBA, BIN_ADD | B2_DBA_OTC(0) /* | B2_DBA_D * Seite 352 */ | B2_DBA_DIRECT);
 		visfx_writel(info, B2_SBA, BIN_ADD | B2_DBA_OTC(0));
-		visfx_writel(info, B2_IPM, 0x00ffffff); // keine A-Mask
+		// visfx_writel(info, B2_IPM, 0x00ffffff); // keine A-Mask
 		visfx_writel(info, B2_IPM, 0xffffff); // mit A-Mask
 	}
 
