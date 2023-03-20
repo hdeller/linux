@@ -13,10 +13,11 @@
 #include <linux/fb.h>
 #include <linux/delay.h>
 #include <linux/rational.h>
+#include <asm/grfioctl.h>
 #include "sticore.h"
 #include "visualizefx.h"
 
-#define VISFX_CARDTYPE_FX5		0x35acda30
+#define VISFX_CARDTYPE_FX5	CRT_ID_LEGO
 
 #define UP_CONTROL_TO		BIT(13)
 #define UP_CONTROL_TCE		BIT(12)
@@ -34,6 +35,13 @@
 #define VISFX_FB_LENGTH			0x01000000
 #define VISFX_FB_OFFSET			0x01000000
 #define NR_PALETTE 256
+
+/*
+ * Minimum X and Y resolutions
+ */
+#define MIN_XRES	320
+#define MIN_YRES	280
+#define DEFAULT_BPP	32
 
 static char *mode_option; /* empty means take video mode from ROM */
 
@@ -56,7 +64,7 @@ struct visfx_default {
 struct visfx_par {
 	struct visfx_default *defaults;
 	struct device *dev;
-	u32 pseudo_palette[256];
+	u32 pseudo_palette[NR_PALETTE];
 	unsigned long debug_reg;
 	void __iomem *reg_base;
 	unsigned long reg_size;
@@ -268,11 +276,11 @@ static void visfx_get_video_mode(struct fb_info *info)
 	var->transp.length = 8;
 	var->transp.offset = 0;
 
-	var->bits_per_pixel = 32;
+	var->bits_per_pixel = DEFAULT_BPP;
 	var->grayscale = 0;
 	var->xres_virtual = var->xres;
 	var->yres_virtual = var->yres;
-	info->screen_size = 2048 * var->yres * 32/8;
+	info->screen_size = 2048 * DEFAULT_BPP/8 * var->yres;
 }
 
 static int visfx_wait_pll(struct fb_info *info)
@@ -363,22 +371,42 @@ static int visfx_set_par(struct fb_info *info)
 	visfx_writel(info, B2_CFG, tmp);
 	visfx_writel(info, B2_MPC, 0xc);
 	visfx_get_video_mode(info);
+
 	return 0;
 }
 
 static int visfx_check_var(struct fb_var_screeninfo *var, struct fb_info *info)
 {
+	struct fb_var_screeninfo *v = &info->var;
+
 	if (var->pixclock > VISFX_SYNC_PLL_BASE ||
-	    var->left_margin > 512 ||
-	    var->right_margin > 512 ||
-	    var->hsync_len > 512 ||
-	    var->lower_margin > 256 ||
-	    var->upper_margin > 256 ||
-	    var->vsync_len > 256 ||
+		var->left_margin > 512 ||
+		var->right_margin > 512 ||
+		var->hsync_len > 512 ||
+		var->lower_margin > 256 ||
+		var->upper_margin > 256 ||
+		var->vsync_len > 256 ||
 		var->xres > 2048 ||
-		var->yres > 2048)
+		var->yres > 2048 ||
+		var->bits_per_pixel != DEFAULT_BPP)
 		return -EINVAL;
-	// bpp != 32
+
+	if (var->xres < MIN_XRES)
+		var->xres = MIN_XRES;
+	if (var->yres < MIN_YRES)
+		var->yres = MIN_YRES;
+	var->xres_virtual = var->xres;
+	var->yres_virtual = var->yres;
+
+	/*
+	 * Copy the RGB parameters for this display
+	 * from the machine specific parameters.
+	 */
+	var->red    = v->red;
+	var->green  = v->green;
+	var->blue   = v->blue;
+	var->transp = v->transp;
+
 	return 0;
 }
 
@@ -460,7 +488,6 @@ printk("visfx_open  %d  user %d\n", par->open_count, user);
 		#define BIN_ADD	(BIN_8F << 16)
 		visfx_writel(info, B2_DBA, BIN_ADD | B2_DBA_OTC(0) /* | B2_DBA_D * Seite 352 */ | B2_DBA_DIRECT);
 		visfx_writel(info, B2_SBA, BIN_ADD | B2_DBA_OTC(0));
-		// visfx_writel(info, B2_IPM, 0x00ffffff); // keine A-Mask
 		visfx_writel(info, B2_IPM, 0xffffff); // mit A-Mask
 	}
 
@@ -482,8 +509,10 @@ static const struct fb_ops visfx_ops = {
 	.owner		= THIS_MODULE,
 	.fb_open	= visfx_open,
 	.fb_release	= visfx_release,
+        // .fb_blank       = stifb_blank,
 	.fb_setcmap	= visfx_setcmap,
 	.fb_fillrect	= visfx_fillrect,
+        // .fb_copyarea    = stifb_copyarea,
 	.fb_imageblit	= visfx_imageblit,
 	.fb_set_par	= visfx_set_par,
 	.fb_check_var	= visfx_check_var,
@@ -833,7 +862,7 @@ static int visfx_initialize(struct fb_info *info)
 	visfx_writel(info, B2_BMAP_BABoth, 0x40000200);
 	visfx_writel(info, 0x1000000, 0);
 	visfx_writel(info, B2_BMAP_BABoth, 0x200);
-	visfx_writel(info, 0x800040, 0);
+	visfx_writel(info, B2_MV, 0);
 
 	// setup video regs
 	ret = visfx_set_default_mode(info);
@@ -909,7 +938,7 @@ static void visfx_setup_info(struct pci_dev *pdev, struct fb_info *info)
 	info->fix.smem_len = VISFX_FB_LENGTH;
 	info->fix.type = FB_TYPE_PACKED_PIXELS;
 	info->fix.visual = FB_VISUAL_DIRECTCOLOR;
-	info->fix.line_length = 2048 * 32/8;
+	info->fix.line_length = 2048 * DEFAULT_BPP / 8;
 	info->fix.accel = FB_ACCEL_NONE;
 }
 
@@ -952,7 +981,7 @@ static int __init visfx_init_device(struct pci_dev *pdev, struct sti_struct *sti
 printk("MODE OPTION %s\n", mode_option);
 printk("visfxfb 111  %dx%d-%d frame buffer device\n", info->var.xres, info->var.yres, info->var.bits_per_pixel);
 	if (mode_option &&
-	    fb_find_mode(&info->var, info, mode_option, NULL, 0, NULL, 24))
+	    fb_find_mode(&info->var, info, mode_option, NULL, 0, NULL, DEFAULT_BPP))
 		if (visfx_check_var(&info->var, info) == 0)
 			visfx_set_par(info);
 printk("visfxfb 222  %dx%d-%d frame buffer device\n", info->var.xres, info->var.yres, info->var.bits_per_pixel);
@@ -1042,11 +1071,6 @@ static void __exit visfx_remove(struct pci_dev *pdev)
 {
 	struct fb_info *info = pci_get_drvdata(pdev);
 
-	// sst_shutdown(info);
-	// iounmap(info->screen_base);
-	// iounmap(par->mmio_vbase);
-	// release_mem_region(info->fix.smem_start, 0x400000);
-	// release_mem_region(info->fix.mmio_start, info->fix.mmio_len);
 	fb_dealloc_cmap(&info->cmap);
 	unregister_framebuffer(info);
 	framebuffer_release(info);
