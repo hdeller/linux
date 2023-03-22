@@ -3953,6 +3953,13 @@
 #define B2_DBA_P		(1 << 9)
 #define B2_DBA_S		(1 << 10)
 #define B2_DBA_D		(1 << 11)
+#define B2_DBA_BIN8I		(0 << 16)	/* 8 bit indexed */  /* page 335 */
+#define B2_DBA_BIN8F		(7 << 16)	/* ARGB888 truecolor */
+#define B2_DBA_OTC04		(2 << 24)	/* 4 bytes per word access */
+#define B2_DBA_OTC01		(0 << 24)	/* one ARGB888 per word access */
+
+#define B2_EN2D_BYTE_MODE	0x30
+#define B2_EN2D_WORD_MODE	0x50
 
 #define UB_CP_CURSOR_ENABLE            0x80000000
 #endif

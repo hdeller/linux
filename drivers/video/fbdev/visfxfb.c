@@ -110,11 +110,25 @@ static int visfx_wait_write_pipe_empty(struct fb_info *info)
 	return -ETIMEDOUT;
 }
 
+static void visfx_set_DBA(struct fb_info *info)
+{
+	visfx_wait_write_pipe_empty(info);
+
+	if (info->var.bits_per_pixel == 32) {
+		visfx_writel(info, B2_EN2D, B2_EN2D_WORD_MODE);
+		visfx_writel(info, B2_DBA, B2_DBA_BIN8F | B2_DBA_OTC01 | B2_DBA_DIRECT);
+		visfx_writel(info, B2_SBA, B2_DBA_BIN8F | B2_DBA_OTC01);
+	} else { /* 8-bit indexed: */
+		visfx_writel(info, B2_EN2D, B2_EN2D_BYTE_MODE);
+		visfx_writel(info, B2_DBA, B2_DBA_BIN8I | B2_DBA_OTC04 | B2_DBA_DIRECT);
+		visfx_writel(info, B2_SBA, B2_DBA_BIN8I | B2_DBA_OTC04);
+	}
+	visfx_writel(info, B2_BMAP_DBA, 0x02680e02);
+	visfx_writel(info, B2_IPM, 0xffffffff); /* all bits relevant, incl. A-mask */
+}
+
 static void visfx_set_vram_addr(struct fb_info *info, int x, int y)
 {
-	// FIXME: Je nach EN2D Pixel Address mode !!
-	// daher vielleicht bei Byte mode nur << 10 !!
-	// DIES IST NUR IN BINC-Mode richtig:
 	visfx_writel(info, B2_DWA, (y << 16) | x);
 }
 
@@ -170,6 +184,7 @@ static void visfx_imageblit_mono(struct fb_info *info, const char *data, int dx,
 			visfx_copyline(info, data, x, width, height, LINESIZE(_width));
 		}
 	}
+	visfx_writel(info, B2_BPM, 0xffffffff);
 }
 
 static void visfx_imageblit(struct fb_info *info, const struct fb_image *image)
@@ -186,9 +201,8 @@ static void visfx_imageblit(struct fb_info *info, const struct fb_image *image)
 				     image->fg_color, image->bg_color);
 		break;
 	case 8:
-		visfx_writel(info, B2_DBA, B2_DBA_OTC(0) | B2_DBA_DIRECT);
+		visfx_writel(info, B2_DBA, B2_DBA_OTC01 | B2_DBA_DIRECT);
 		visfx_writel(info, B2_BPM, 0xffffffff);
-
 		visfx_wclip(info, 0, 0, info->var.xres, info->var.yres);
 
 		for (y = 0; y < image->height; y++) {
@@ -205,6 +219,7 @@ static void visfx_imageblit(struct fb_info *info, const struct fb_image *image)
 		dev_err(par->dev, "depth %d not supported\n", image->depth);
 		break;
 	}
+	visfx_set_DBA(info);
 }
 
 static void visfx_fillrect(struct fb_info *info, const struct fb_fillrect *fr)
@@ -214,6 +229,7 @@ static void visfx_fillrect(struct fb_info *info, const struct fb_fillrect *fr)
 	visfx_set_bmove_color(info, fr->color, 0);
 	visfx_writel(info, B2_MNOOP_R0R1, (fr->dx << 16) | fr->dy);
 	visfx_writel(info, B2_SOLIDFILL_R2R3, (fr->width << 16) | fr->height);
+	visfx_set_DBA(info);
 }
 
 static int visfx_setcmap(struct fb_cmap *cmap, struct fb_info *info)
@@ -235,6 +251,42 @@ static int visfx_setcmap(struct fb_cmap *cmap, struct fb_info *info)
 	visfx_writel(info, B2_CP, 0);
 	return 0;
 }
+
+/**
+ * visfx_blank() - blank or unblank the given window
+ * @blank_mode: The blank state from FB_BLANK_*
+ * @info: The framebuffer to blank.
+ *
+ * Framebuffer layer request to change the power state.
+ */
+static int visfx_blank(int blank_mode, struct fb_info *info)
+{
+	u32 mpc;
+
+	switch (blank_mode) {
+	case FB_BLANK_POWERDOWN:
+		mpc = 3;
+		break;
+	case FB_BLANK_NORMAL:
+		mpc = 0;
+		break;
+	case FB_BLANK_UNBLANK:
+		mpc = 3 << 2;
+		break;
+	case FB_BLANK_VSYNC_SUSPEND:
+		mpc = 1 << 1;
+		break;
+	case FB_BLANK_HSYNC_SUSPEND:
+		mpc = 1 << 0;
+		break;
+	default:
+		return 1;
+	}
+	visfx_writel(info, B2_MPC, mpc);
+
+	return 0;
+}
+
 
 static void visfx_get_video_mode(struct fb_info *info)
 {
@@ -267,20 +319,38 @@ static void visfx_get_video_mode(struct fb_info *info)
 	if (tmp & VISFX_VSYNC_POSITIVE)
 		var->sync |= FB_SYNC_VERT_HIGH_ACT;
 
-	var->red.length = 8;
-	var->red.offset = 8;
-	var->green.length = 8;
-	var->green.offset = 16;
-	var->blue.length = 8;
-	var->blue.offset = 24;
-	var->transp.length = 8;
-	var->transp.offset = 0;
+	if (var->bits_per_pixel == 0)
+		var->bits_per_pixel = DEFAULT_BPP;
 
-	var->bits_per_pixel = DEFAULT_BPP;
-	var->grayscale = 0;
+	info->fix.line_length = 2048 * var->bits_per_pixel / 8;
+	switch (var->bits_per_pixel) {
+	case 32:
+		info->fix.visual = FB_VISUAL_DIRECTCOLOR;
+		var->red.length = 8;
+		var->red.offset = 8;
+		var->green.length = 8;
+		var->green.offset = 16;
+		var->blue.length = 8;
+		var->blue.offset = 24;
+		var->transp.length = 8;
+		var->transp.offset = 0;
+		break;
+	default:
+		info->fix.visual = FB_VISUAL_PSEUDOCOLOR;
+		var->red.length = 8;
+		var->red.offset = 0;
+		var->green.length = 8;
+		var->green.offset = 0;
+		var->blue.length = 8;
+		var->blue.offset = 0;
+		var->transp.length = 0;
+		var->transp.offset = 0;
+	}
+
+	var->grayscale = 0; // XXX
 	var->xres_virtual = var->xres;
 	var->yres_virtual = var->yres;
-	info->screen_size = 2048 * DEFAULT_BPP/8 * var->yres;
+	info->screen_size = var->bits_per_pixel * 2048/8 * var->yres;
 }
 
 static int visfx_wait_pll(struct fb_info *info)
@@ -387,8 +457,10 @@ static int visfx_check_var(struct fb_var_screeninfo *var, struct fb_info *info)
 		var->upper_margin > 256 ||
 		var->vsync_len > 256 ||
 		var->xres > 2048 ||
-		var->yres > 2048 ||
-		var->bits_per_pixel != DEFAULT_BPP)
+		var->yres > 2048)
+		return -EINVAL;
+// printk("visfx_check_var  bpp %d\n", var->bits_per_pixel);
+	if (var->bits_per_pixel != 8 && var->bits_per_pixel != DEFAULT_BPP)
 		return -EINVAL;
 
 	if (var->xres < MIN_XRES)
@@ -481,14 +553,7 @@ static int visfx_open(struct fb_info *info, int user)
 
 printk("visfx_open  %d  user %d\n", par->open_count, user);
 	if (user && par->open_count++ == 0) {
-		visfx_writel(info, B2_EN2D, 0x50);
-		visfx_writel(info, B2_BMAP_DBA, 0x02680e02);
-		// BIN_8F (#7) mounten?  siehe Seite 338
-		#define BIN_8F	7	/* ARGB888 */
-		#define BIN_ADD	(BIN_8F << 16)
-		visfx_writel(info, B2_DBA, BIN_ADD | B2_DBA_OTC(0) /* | B2_DBA_D * Seite 352 */ | B2_DBA_DIRECT);
-		visfx_writel(info, B2_SBA, BIN_ADD | B2_DBA_OTC(0));
-		visfx_writel(info, B2_IPM, 0xffffff); // mit A-Mask
+		// visfx_set_DBA(info);
 	}
 
 	return 0;
@@ -509,12 +574,12 @@ static const struct fb_ops visfx_ops = {
 	.owner		= THIS_MODULE,
 	.fb_open	= visfx_open,
 	.fb_release	= visfx_release,
-        // .fb_blank       = stifb_blank,
 	.fb_setcmap	= visfx_setcmap,
 	.fb_fillrect	= visfx_fillrect,
         // .fb_copyarea    = stifb_copyarea,
 	.fb_imageblit	= visfx_imageblit,
 	.fb_set_par	= visfx_set_par,
+	// .fb_blank	= visfx_blank,
 	.fb_check_var	= visfx_check_var,
 	.fb_cursor	= visfx_cursor,
 };
@@ -566,7 +631,6 @@ static int visfx_reset(struct fb_info *info)
 
 	visfx_writel(info, B2_SWEN, 0xffffffff);
 	visfx_writel(info, B2_SREN, 0xffffffff);
-
 
 	ret = visfx_wait_write_pipe_empty(info);
 	if (ret)
@@ -673,7 +737,6 @@ static void visfx_clear_buffer(struct fb_info *info, u32 dba, u32 bmap_dba, u32 
 	visfx_writel(info, B2_IFC, ifc);
 	visfx_writel(info, B2_FOE, 1);
 	visfx_writel(info, B2_SOV, 0);
-	visfx_writel(info, B2_WORG, 0);
 	visfx_writel(info, B2_WCE, 0);
 	visfx_writel(info, B2_CPE, 0);
 	visfx_writel(info, B2_MBWB, mbwb);
@@ -719,7 +782,6 @@ static void visfx_setup(struct fb_info *info)
 	visfx_writel(info, B2_FOE, 1);
 	visfx_writel(info, B2_IBO, 0);
 	visfx_writel(info, B2_SB, 0);
-	visfx_writel(info, B2_WORG, 0);
 	visfx_writel(info, B2_WCE, 0);
 	visfx_writel(info, B2_CPE, 0);
 	visfx_writel(info, B2_ZBO, 0x00080000);
@@ -777,7 +839,6 @@ static void visfx_setup(struct fb_info *info)
 	visfx_clear_buffer(info, 0x05000880, 0x23a80380, 0x00fc0000, 0xffffffff);
 	visfx_buffer_setup(info, 2, 0, 0x08000084, 0);
 
-	visfx_writel(info, B2_WORG, 0);
 	visfx_writel(info, B2_WCE, 0);
 	visfx_writel(info, B2_SOV, 0);
 	visfx_writel(info, B2_DBA, 0x05000880);
@@ -844,7 +905,6 @@ static int visfx_initialize(struct fb_info *info)
 	for(i = 0; i < 6; i++)
 		visfx_writel(info, B3_GA_NOP_EOC, 0);
 
-	visfx_writel(info, B2_WORG, 0);
 	visfx_writel(info, B2_FOE, 0);
 	visfx_writel(info, B2_IBO, 0);
 	visfx_writel(info, B2_FCDA, 0);
@@ -853,7 +913,7 @@ static int visfx_initialize(struct fb_info *info)
 	visfx_writel(info, B2_IPM, 0xffffffff);
 
 	visfx_wclip(info, 0, 0, 2048, 2048);
-	visfx_writel(info, B2_EN2D, 0xb0);
+	visfx_writel(info, B2_EN2D, 0x80 | B2_EN2D_BYTE_MODE);
 	visfx_writel(info, B2_BABoth, 0x2000000);
 	visfx_writel(info, B2_BMAP_BABoth, 0x200);
 	visfx_writel(info, 0x1000000, 0);
@@ -872,20 +932,22 @@ static int visfx_initialize(struct fb_info *info)
 	visfx_writel(info, B2_MFU_BSCTD, 0x1b);
 	visfx_writel(info, B2_MFU_BSCCTL, 0x1b);
 	visfx_writel(info, B2_FBC_RBS, 0xe4);
-	visfx_writel(info, B2_WORG, 0);
 	visfx_writel(info, B2_FOE, 0);
 
 	visfx_writel(info, B2_FCDA, 0);
 	visfx_writel(info, B2_WCE, 0);
 	visfx_writel(info, B2_CPE, 0);
 	visfx_writel(info, B2_WCLIP1UL, 0);
-	visfx_writel(info, B2_EN2D, 0xb0);
+	visfx_writel(info, B2_EN2D, 0x80 | B2_EN2D_BYTE_MODE);
 
-	visfx_writel(info, B2_DBA, B2_DBA_OTC(2));
+	visfx_writel(info, B2_DBA, B2_DBA_OTC04);
 	visfx_writel(info, B2_IPM, 0xffffffff);
 	visfx_writel(info, B2_BPM, 0xffffffff);
 
 	visfx_setup(info);
+
+	visfx_set_DBA(info);
+
 	return 0;
 }
 
@@ -925,10 +987,8 @@ static void visfx_setup_info(struct pci_dev *pdev, struct fb_info *info)
 	struct visfx_par *par = info->par;
 
 	info->fbops = &visfx_ops;
-	info->flags = FBINFO_DEFAULT |
-		      FBINFO_HWACCEL_COPYAREA |
-		      FBINFO_HWACCEL_FILLRECT |
-		      FBINFO_HWACCEL_IMAGEBLIT;
+	info->flags = FBINFO_HWACCEL_FILLRECT | FBINFO_HWACCEL_IMAGEBLIT;
+// FBINFO_HWACCEL_COPYAREA |
 	info->pseudo_palette = par->pseudo_palette;
 	info->screen_base = par->reg_base + VISFX_FB_OFFSET;
 
