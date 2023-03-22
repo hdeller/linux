@@ -119,9 +119,11 @@ static void visfx_set_DBA(struct fb_info *info)
 		visfx_writel(info, B2_DBA, B2_DBA_BIN8F | B2_DBA_OTC01 | B2_DBA_DIRECT);
 		visfx_writel(info, B2_SBA, B2_DBA_BIN8F | B2_DBA_OTC01);
 	} else { /* 8-bit indexed: */
+printk("8-bit indexed\n");
 		visfx_writel(info, B2_EN2D, B2_EN2D_BYTE_MODE);
-		visfx_writel(info, B2_DBA, B2_DBA_BIN8I | B2_DBA_OTC04 | B2_DBA_DIRECT);
+		visfx_writel(info, B2_DBA, B2_DBA_BIN8I | B2_DBA_OTC04 | B2_DBA_D | B2_DBA_S | B2_DBA_DIRECT);
 		visfx_writel(info, B2_SBA, B2_DBA_BIN8I | B2_DBA_OTC04);
+	visfx_writel(info, B2_BPD, 0xffffffff);
 	}
 	visfx_writel(info, B2_BMAP_DBA, 0x02680e02);
 	visfx_writel(info, B2_IPM, 0xffffffff); /* all bits relevant, incl. A-mask */
@@ -134,7 +136,7 @@ static void visfx_set_vram_addr(struct fb_info *info, int x, int y)
 
 static u32 visfx_cmap_entry(struct fb_cmap *cmap, int color)
 {
-	return (((cmap->blue[color] & 0xff)) |
+	return (((cmap->blue[color] & 0xff) << 0) |
 		((cmap->green[color] & 0xff) << 8) |
 		(cmap->red[color] & 0xff) << 16);
 }
@@ -236,8 +238,7 @@ static int visfx_setcmap(struct fb_cmap *cmap, struct fb_info *info)
 {
 	unsigned int i;
 
-	return 0;
-
+printk("visfx_setcmap  len = %d\n", cmap->len);
 	visfx_writel(info, B2_LLCA, cmap->start);
 
 	for (i = 0; i < cmap->len; i++) {
@@ -247,7 +248,7 @@ static int visfx_setcmap(struct fb_cmap *cmap, struct fb_info *info)
 		((u32*)info->pseudo_palette)[cmap->start + i] = rgb;
 	}
 
-	visfx_writel(info, B2_PMASK, 0xffffff);
+	visfx_writel(info, B2_PMASK, 0xffffffff);
 	visfx_writel(info, B2_CP, 0);
 	return 0;
 }
@@ -336,6 +337,20 @@ static void visfx_get_video_mode(struct fb_info *info)
 		var->transp.offset = 0;
 		break;
 	default:
+printk("ALTER OTR %08x\n", visfx_readl(info, B2_OTR));
+		visfx_writel(info, B2_OTR, 1<<16 | 0); // ???  Seite 382
+
+printk("ALTER IAA0 %08x\n", visfx_readl(info, B2_IAA2-8));
+//		visfx_writel(info, B2_IAA2-8, 0); // 8-bit indexed, wählt CFS0, LUT0, Seite 383
+printk("ALTER CFS0 %08x\n", visfx_readl(info, B2_CFS0)); // Seite 390
+printk("ALTER CFS16 %08x\n", visfx_readl(info, B2_CFS16)); // Seite 396
+// [  164.191206] ALTER OTR   00070000
+// [  164.191218] ALTER IAA0  00070000
+// [  164.191226] ALTER CFS0  00070000
+// [  164.191233] ALTER CFS16 00070000
+
+		visfx_writel(info, B2_CFS16, 0); 
+
 		info->fix.visual = FB_VISUAL_PSEUDOCOLOR;
 		var->red.length = 8;
 		var->red.offset = 0;
@@ -351,6 +366,7 @@ static void visfx_get_video_mode(struct fb_info *info)
 	var->xres_virtual = var->xres;
 	var->yres_virtual = var->yres;
 	info->screen_size = var->bits_per_pixel * 2048/8 * var->yres;
+	info->fix.smem_len = info->screen_size;
 }
 
 static int visfx_wait_pll(struct fb_info *info)
@@ -553,7 +569,7 @@ static int visfx_open(struct fb_info *info, int user)
 
 printk("visfx_open  %d  user %d\n", par->open_count, user);
 	if (user && par->open_count++ == 0) {
-		// visfx_set_DBA(info);
+		visfx_set_DBA(info);
 	}
 
 	return 0;
@@ -581,7 +597,7 @@ static const struct fb_ops visfx_ops = {
 	.fb_set_par	= visfx_set_par,
 	// .fb_blank	= visfx_blank,
 	.fb_check_var	= visfx_check_var,
-	.fb_cursor	= visfx_cursor,
+	// .fb_cursor	= visfx_cursor,
 };
 
 static void visfx_bus_error_timer_enable(struct fb_info *info, bool enable)
