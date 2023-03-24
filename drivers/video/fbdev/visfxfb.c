@@ -858,7 +858,7 @@ static void visfx_setup(struct fb_info *info)
 		visfx_writel(info, B2_CFS16, 0x43); // mode=4, LUT=3 LUT auswählen
 		par->bmap_dba = 0x01400280;
 		par->bmap_dba = 0x00000200;
-		par->bmap_dba = 0x80000200;  <- am besten
+		par->bmap_dba = 0x80000200; // <- am besten
 	}
 
 	visfx_writel(info, B2_IBMAP0, par->bmap_dba);
