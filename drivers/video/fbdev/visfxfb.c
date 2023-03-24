@@ -723,7 +723,7 @@ static void visfx_setup(struct fb_info *info)
 	visfx_writel(info, B2_WCE, 0);
 	visfx_writel(info, B2_CPE, 0);
 	visfx_writel(info, B2_ZBO, 0x00080000);
-	visfx_writel(info, B2_RTG_MEM_LOAD, 0xc9200);
+	visfx_writel(info, B2_RTG_MEM_LOAD, 0xc9200); // bits 21:2 of host address
 	visfx_writel(info, B2_TM_TSS, 0);
 	visfx_writel(info, B2_FCDA, 0);
 	visfx_writel(info, B2_BMAP_Z, 0);
@@ -801,7 +801,7 @@ static void visfx_setup(struct fb_info *info)
 
 	switch (var->bits_per_pixel) {
 	case 32:
-		info->fix.visual = FB_VISUAL_DIRECTCOLOR;
+		info->fix.visual = FB_VISUAL_TRUECOLOR;
 		var->red.length = 8;
 		var->red.offset = 8;
 		var->green.length = 8;
@@ -829,14 +829,13 @@ static void visfx_setup(struct fb_info *info)
 
 	/* set DBA */
 	visfx_writel(info, B2_BMAP_DBA, 0x02680e02);
-
 	if (info->var.bits_per_pixel == 32) {
 		visfx_writel(info, B2_EN2D, B2_EN2D_WORD_MODE);
-		par->dba = B2_DBA_BIN8F | B2_DBA_OTC01 | B2_DBA_DIRECT;
+		par->dba = B2_DBA_BIN8F | B2_DBA_OTC01 | B2_DBA_DIRECT | B2_DBA_D;
 		visfx_writel(info, B2_SBA, B2_DBA_BIN8F | B2_DBA_OTC01);
 	} else { /* 8-bit indexed: */
 		visfx_writel(info, B2_EN2D, B2_EN2D_BYTE_MODE);
-		par->dba = B2_DBA_BIN8I | B2_DBA_OTC04 | B2_DBA_DIRECT | B2_DBA_S;
+		par->dba = B2_DBA_BIN8I | B2_DBA_OTC04 | B2_DBA_DIRECT | B2_DBA_D;
 		visfx_writel(info, B2_SBA, B2_DBA_BIN8I | B2_DBA_OTC04);
 		visfx_writel(info, B2_BPM, 0xffffffff);
 		visfx_writel(info, B2_OTR, 1<<16 | 0); // ???  Seite 382
