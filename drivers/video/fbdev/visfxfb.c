@@ -64,7 +64,7 @@ struct visfx_default {
 struct visfx_par {
 	void __iomem *reg_base;
 	unsigned long reg_size;
-	u32 dba;
+	u32 dba, bmap_dba;
 	u32 pseudo_palette[NR_PALETTE];
 	struct visfx_default *defaults;
 	struct device *dev;
@@ -223,6 +223,9 @@ static void visfx_fillrect(struct fb_info *info, const struct fb_fillrect *fr)
 static int visfx_setcmap(struct fb_cmap *cmap, struct fb_info *info)
 {
 	unsigned int i;
+
+	if (info->fix.visual != FB_VISUAL_PSEUDOCOLOR)
+		return -EINVAL;
 
 // printk("visfx_setcmap  len = %d\n", cmap->len);
 	visfx_writel(info, B2_LLCA, cmap->start);
@@ -702,10 +705,21 @@ static void visfx_setup(struct fb_info *info)
 	visfx_wait_write_pipe_empty(info);
 
 #ifdef __BIG_ENDIAN
+	// SEite 238
 	visfx_writel(info, B2_DMA_BSCFB, DSM_NO_BYTE_SWAP);
 	visfx_writel(info, B2_PDU_BSCFB, DSM_NO_BYTE_SWAP);
 	visfx_writel(info, B2_MFU_BSCTD, DSM_NO_BYTE_SWAP);
 	visfx_writel(info, B2_MFU_BSCCTL, DSM_PDU_BYTE_SWAP_DEFAULT);
+#if 0
+#define DSM_NO_BYTE_SWAP                        0xe4e4e4e4
+#define DSM_RGBA_TO_ARGB_BYTE_SWAP              0x39393939
+#define DSM_ARGB_TO_RGBA_BYTE_SWAP              0x93939393
+#define DSM_PDU_BYTE_SWAP_DEFAULT               0x1b1b1b1b
+#define DSM_DMA_BYTE_SWAP_DEFAULT               0x1b1b1b1b
+#define DSM_MFU_BYTE_SWAP_DEFAULT               0x1b1b1b1b
+#define DSM_HOST_IS_LITTLE_ENDIAN               0x01010101
+#define DSM_HOST_IS_BIG_ENDIAN                  0x00000000
+#endif
 #else
 	visfx_writel(info, B2_DMA_BSCFB, DSM_PDU_BYTE_SWAP_DEFAULT);
 	visfx_writel(info, B2_PDU_BSCFB, DSM_PDU_BYTE_SWAP_DEFAULT);
@@ -723,7 +737,7 @@ static void visfx_setup(struct fb_info *info)
 	visfx_writel(info, B2_WCE, 0);
 	visfx_writel(info, B2_CPE, 0);
 	visfx_writel(info, B2_ZBO, 0x00080000);
-	visfx_writel(info, B2_RTG_MEM_LOAD, 0xc9200); // bits 21:2 of host address
+	visfx_writel(info, B2_RTG_MEM_LOAD, 0xc9200); // bits 21:2 of host address XXX
 	visfx_writel(info, B2_TM_TSS, 0);
 	visfx_writel(info, B2_FCDA, 0);
 	visfx_writel(info, B2_BMAP_Z, 0);
@@ -798,6 +812,7 @@ static void visfx_setup(struct fb_info *info)
 	info->fix.accel = FB_ACCEL_NONE;
 	info->fix.type = FB_TYPE_PACKED_PIXELS;
 	info->fix.line_length = 2048 * var->bits_per_pixel / 8;
+	info->fix.smem_len = PAGE_ALIGN(info->fix.line_length * var->yres);
 
 	switch (var->bits_per_pixel) {
 	case 32:
@@ -826,13 +841,14 @@ static void visfx_setup(struct fb_info *info)
 	var->grayscale = 0;
 	var->xres_virtual = var->xres;
 	var->yres_virtual = var->yres;
+	visfx_wclip(info, 0, 0, var->xres, var->yres);
 
 	/* set DBA */
-	visfx_writel(info, B2_BMAP_DBA, 0x02680e02);
 	if (info->var.bits_per_pixel == 32) {
 		visfx_writel(info, B2_EN2D, B2_EN2D_WORD_MODE);
 		par->dba = B2_DBA_BIN8F | B2_DBA_OTC01 | B2_DBA_DIRECT | B2_DBA_D;
 		visfx_writel(info, B2_SBA, B2_DBA_BIN8F | B2_DBA_OTC01);
+		par->bmap_dba = 0x02680e02;
 	} else { /* 8-bit indexed: */
 		visfx_writel(info, B2_EN2D, B2_EN2D_BYTE_MODE);
 		par->dba = B2_DBA_BIN8I | B2_DBA_OTC04 | B2_DBA_DIRECT | B2_DBA_D;
@@ -840,7 +856,14 @@ static void visfx_setup(struct fb_info *info)
 		visfx_writel(info, B2_BPM, 0xffffffff);
 		visfx_writel(info, B2_OTR, 1<<16 | 0); // ???  Seite 382
 		visfx_writel(info, B2_CFS16, 0x43); // mode=4, LUT=3 LUT auswählen
+		par->bmap_dba = 0x01400280;
+		par->bmap_dba = 0x00000200;
+		par->bmap_dba = 0x80000200;  <- am besten
 	}
+
+	visfx_writel(info, B2_IBMAP0, par->bmap_dba);
+	visfx_writel(info, B2_IMD, par->bmap_dba);
+	visfx_writel(info, B2_BMAP_BABoth, par->bmap_dba);  // WOW !!!!!
 
 	visfx_writel(info, B2_DBA, par->dba);
 	visfx_writel(info, B2_IPM, 0xffffffff); /* all bits/planes relevant, incl. A-mask */
@@ -901,7 +924,7 @@ static int __init visfx_initialize(struct fb_info *info)
 	visfx_writel(info, B2_IPM, 0xffffffff);
 
 	visfx_wclip(info, 0, 0, 2048, 2048);
-	visfx_writel(info, B2_EN2D, 0x80 | B2_EN2D_BYTE_MODE);
+	visfx_writel(info, B2_EN2D, B2_EN2D_BYTE_MODE);
 	visfx_writel(info, B2_BABoth, 0x2000000);
 	visfx_writel(info, B2_BMAP_BABoth, 0x200);
 	visfx_writel(info, 0x1000000, 0);
@@ -926,7 +949,7 @@ static int __init visfx_initialize(struct fb_info *info)
 	visfx_writel(info, B2_WCE, 0);
 	visfx_writel(info, B2_CPE, 0);
 	visfx_writel(info, B2_WCLIP1UL, 0);
-	visfx_writel(info, B2_EN2D, 0x80 | B2_EN2D_BYTE_MODE);
+	visfx_writel(info, B2_EN2D, B2_EN2D_BYTE_MODE);
 
 	return 0;
 }
@@ -978,7 +1001,7 @@ static void visfx_setup_info(struct pci_dev *pdev, struct fb_info *info)
 	info->fix.smem_len = VISFX_FB_LENGTH;
 	info->fix.type = FB_TYPE_PACKED_PIXELS;
 	if (DEFAULT_BPP == 32)
-		info->fix.visual = FB_VISUAL_DIRECTCOLOR;
+		info->fix.visual = FB_VISUAL_TRUECOLOR;
 	else
 		info->fix.visual = FB_VISUAL_PSEUDOCOLOR;
 	info->fix.line_length = 2048 * DEFAULT_BPP / 8;

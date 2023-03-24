@@ -3958,8 +3958,8 @@
 #define B2_DBA_OTC04		(2 << 24)	/* 4 bytes per word access */
 #define B2_DBA_OTC01		(0 << 24)	/* one ARGB888 per word access */
 
-#define B2_EN2D_BYTE_MODE	0x30
-#define B2_EN2D_WORD_MODE	0x50
+#define B2_EN2D_BYTE_MODE	0x30 | 0x80	/* mode and disable pixel interpolation */
+#define B2_EN2D_WORD_MODE	0x50 | 0x80
 
 #define UB_CP_CURSOR_ENABLE            0x80000000
 #endif
