@@ -4,6 +4,9 @@
  *
  * Copyright (c) 2021-2023 Sven Schnelle <svens@stackframe.org>
  * Copyright (c)      2022 Helge Deller <deller@gmx.de>
+ *
+ *
+ * insmod ~/visfxfb.ko mode_option=1366x768
  */
 
 #include <linux/module.h>
@@ -14,7 +17,10 @@
 #include <linux/fb.h>
 #include <linux/delay.h>
 #include <linux/rational.h>
+#include <linux/i2c-algo-bit.h>
+
 #include <asm/grfioctl.h>
+
 #include "sticore.h"
 #include "visualizefx.h"
 
@@ -69,6 +75,11 @@ struct visfx_par {
 	struct visfx_default *defaults;
 	struct device *dev;
 	int open_count;
+
+	struct fb_info *info;
+	struct i2c_adapter adapter;
+	struct i2c_algo_bit_data algo;
+	u8 *edid;
 };
 
 static void visfx_setup(struct fb_info *info);
@@ -227,7 +238,7 @@ static int visfx_setcmap(struct fb_cmap *cmap, struct fb_info *info)
 	if (info->fix.visual != FB_VISUAL_PSEUDOCOLOR)
 		return -EINVAL;
 
-// printk("visfx_setcmap  len = %d\n", cmap->len);
+ printk("visfx_setcmap start %d  len = %d\n", cmap->start, cmap->len);
 	visfx_writel(info, B2_LLCA, cmap->start);
 
 	for (i = 0; i < cmap->len; i++) {
@@ -382,6 +393,8 @@ static int visfx_set_par(struct fb_info *info)
 	vsw = var->vsync_len - 1;
 	vfp = var->lower_margin - 1;
 	vbp = var->upper_margin - 1;
+
+printk("visfx_set_par %dx%d-%d\n", xres, yres, var->bits_per_pixel);
 
 	ret = visfx_set_pll(info, B2_PLL_DOT_CTL, var->pixclock);
 	if (ret)
@@ -706,8 +719,13 @@ static void visfx_setup(struct fb_info *info)
 
 #ifdef __BIG_ENDIAN
 	// SEite 238
-	visfx_writel(info, B2_DMA_BSCFB, DSM_NO_BYTE_SWAP);
-	visfx_writel(info, B2_PDU_BSCFB, DSM_NO_BYTE_SWAP);
+	if (1 || var->bits_per_pixel == 32) {
+		visfx_writel(info, B2_DMA_BSCFB, DSM_NO_BYTE_SWAP);
+		visfx_writel(info, B2_PDU_BSCFB, DSM_NO_BYTE_SWAP);
+	} else {
+		visfx_writel(info, B2_DMA_BSCFB, DSM_PDU_BYTE_SWAP_DEFAULT);
+		visfx_writel(info, B2_PDU_BSCFB, DSM_PDU_BYTE_SWAP_DEFAULT);
+	}
 	visfx_writel(info, B2_MFU_BSCTD, DSM_NO_BYTE_SWAP);
 	visfx_writel(info, B2_MFU_BSCCTL, DSM_PDU_BYTE_SWAP_DEFAULT);
 #if 0
@@ -849,17 +867,26 @@ static void visfx_setup(struct fb_info *info)
 		par->dba = B2_DBA_BIN8F | B2_DBA_OTC01 | B2_DBA_DIRECT | B2_DBA_D;
 		visfx_writel(info, B2_SBA, B2_DBA_BIN8F | B2_DBA_OTC01);
 		par->bmap_dba = 0x02680e02;
+		visfx_writel(info, B2_OTR, 1<<8 | 0); // ???  Seite 382, Overlay immer durchsichtig !!
+		visfx_writel(info, B2_FATTR, 0);
 	} else { /* 8-bit indexed: */
 		visfx_writel(info, B2_EN2D, B2_EN2D_BYTE_MODE);
-		par->dba = B2_DBA_BIN8I | B2_DBA_OTC04 | B2_DBA_DIRECT | B2_DBA_D;
 		visfx_writel(info, B2_SBA, B2_DBA_BIN8I | B2_DBA_OTC04);
+		par->dba = B2_DBA_BIN8I | B2_DBA_OTC04 | B2_DBA_DIRECT | B2_DBA_D;  // doch OCT01 ???
+		visfx_writel(info, B2_BABoth, par->dba);
 		visfx_writel(info, B2_BPM, 0xffffffff);
-		visfx_writel(info, B2_OTR, 1<<16 | 0); // ???  Seite 382
-		visfx_writel(info, B2_CFS16, 0x43); // mode=4, LUT=3 LUT auswählen
+		visfx_writel(info, B2_OTR, 1<<16 | 3); // ???  Seite 382, 3=immer undurchsichtig !!
+		// IAA0 -> Seite 383 -> 
+		// visfx_writel(info, B2_CFS16, 0x40); // mode=4, LUT=3 LUT auswählen
+		visfx_writel(info, B2_CFS16, 0x0); // mode=4, LUT=3 LUT auswählen
+		visfx_writel(info, B2_FATTR, 1<<7 | 1<<4); // -> CFS16  -> force Overlay!
+		par->bmap_dba = 0x02680e02;
 		par->bmap_dba = 0x01400280;
 		par->bmap_dba = 0x00000200;
 		par->bmap_dba = 0x80000200; // <- am besten
+		par->bmap_dba = 0x80000800; // <- am besten, aber kein pattern und direct !!
 	}
+// con2fbmap
 
 	visfx_writel(info, B2_IBMAP0, par->bmap_dba);
 	visfx_writel(info, B2_IMD, par->bmap_dba);
@@ -985,7 +1012,186 @@ static int __init visfx_check_defaults(struct fb_info *info)
 	return 0;
 }
 
-static void visfx_setup_info(struct pci_dev *pdev, struct fb_info *info)
+
+/* DDC support */
+
+#define SCL_PIN		(1 << 3)
+#define SDA_PIN		(1 << 2)
+#define SCL_REG		(1 << 1)
+#define SDA_REG		(1 << 0)
+
+static void visfx_setscl(void *data, int state)
+{
+	struct visfx_par *par = data;
+	u32 val;
+
+	// val = visfx_readl(par->info, B2_DDC);
+	val = SCL_REG;
+	if (state)
+		val |= SCL_PIN;
+	else
+		val &= ~SCL_PIN;
+	visfx_writel(par->info, B2_DDC, val);
+}
+
+static void visfx_setsda(void *data, int state)
+{
+	struct visfx_par *par = data;
+	u32 val;
+
+	// val = visfx_readl(par->info, B2_DDC);
+	val = SDA_REG;
+	if (state)
+		val |= SDA_PIN;
+	else
+		val &= ~SDA_PIN;
+	visfx_writel(par->info, B2_DDC, val);
+}
+
+static int visfx_getscl(void *data)
+{
+	struct visfx_par *par = data;
+	u32 val = 0;
+
+	if (visfx_readl(par->info, B2_DDC) & SCL_PIN)
+		val = 1;
+
+	return val;
+}
+
+static int visfx_getsda(void *data)
+{
+	struct visfx_par *par = data;
+	u32 val = 0;
+
+	if (visfx_readl(par->info, B2_DDC) & SDA_PIN)
+		val = 1;
+
+	return val;
+}
+
+static int visfx_setup_i2c_bus(struct visfx_par *par,
+				unsigned int i2c_class)
+{
+	int rc;
+	static const char name[] = "VisFX-DDC";
+
+	strscpy(par->adapter.name, name, sizeof(par->adapter.name));
+	par->adapter.owner = THIS_MODULE;
+	par->adapter.class = i2c_class;
+	par->adapter.algo_data = &par->algo;
+	par->adapter.dev.parent = par->dev;
+	par->algo.setsda = visfx_setsda;
+	par->algo.setscl = visfx_setscl;
+	par->algo.getsda = visfx_getsda;
+	par->algo.getscl = visfx_getscl;
+	par->algo.udelay = 40;
+	par->algo.timeout = msecs_to_jiffies(2);
+	par->algo.data = par;
+
+	i2c_set_adapdata(&par->adapter, par);
+
+	/* Raise SCL and SDA */
+	visfx_setsda(par, 1);
+	visfx_setscl(par, 1);
+	udelay(20);
+
+	rc = i2c_bit_add_bus(&par->adapter);
+	if (rc == 0)
+		dev_dbg(par->dev,
+			"I2C bus %s registered.\n", name);
+	else {
+		dev_warn(par->dev,
+			 "Failed to register I2C bus %s.\n", name);
+	}
+
+	return rc;
+}
+
+static void __init visfx_create_i2c_busses(struct visfx_par *par)
+{
+	visfx_setup_i2c_bus(par, I2C_CLASS_DDC);
+}
+
+static void visfx_delete_i2c_busses(struct visfx_par *par)
+{
+	i2c_del_adapter(&par->adapter);
+}
+
+static int __init visfx_probe_i2c_connector(struct fb_info *info, u8 **out_edid)
+{
+	struct visfx_par *par = info->par;
+	u8 *edid;
+
+	edid = fb_ddc_read(&par->adapter);
+printk("edid1 %px    %*ph\n", edid, 64, edid);
+
+	*out_edid = edid;
+
+	return (edid) ? 0 : 1;
+}
+
+static void __init visfx_find_init_mode(struct fb_info *info)
+{
+	struct fb_videomode mode;
+	struct fb_var_screeninfo var;
+	struct fb_monspecs *specs = &info->monspecs;
+	int found = 0;
+	struct visfx_par *par = info->par;
+
+	INIT_LIST_HEAD(&info->modelist);
+	memset(&mode, 0, sizeof(struct fb_videomode));
+	var = info->var;
+
+	visfx_create_i2c_busses(par);
+
+printk("aaaaaaaa\n");
+	if (!visfx_probe_i2c_connector(info, &par->edid))
+		printk("visfxfb_init_pci: DDC probe successful\n");
+printk("bbbbbbb  par->edid = %px\n", par->edid);
+
+	fb_edid_to_monspecs(par->edid, specs);
+
+printk("Monitor:  %s\n", specs->monitor);
+
+	if (specs->modedb == NULL)
+		printk("visfxfb_init_pci: Unable to get Mode Database\n");
+
+	fb_videomode_to_modelist(specs->modedb, specs->modedb_len,
+				 &info->modelist);
+	if (specs->modedb != NULL) {
+		const struct fb_videomode *m;
+
+		if (1) {   // xres && yres) {
+			if ((m = fb_find_best_mode(&var, &info->modelist))) {
+				mode = *m;
+				found  = 1;
+			}
+		}
+
+		if (!found) {
+			m = fb_find_best_display(&info->monspecs, &info->modelist);
+			mode = *m;
+			found = 1;
+		}
+
+		fb_videomode_to_var(&var, &mode);
+	}
+
+mode_option="1366x768";
+	if (mode_option)
+		fb_find_mode(&var, info, mode_option, specs->modedb,
+			     specs->modedb_len, (found) ? &mode : NULL,
+			     info->var.bits_per_pixel);
+
+	info->var = var;
+	fb_destroy_modedb(specs->modedb);
+	specs->modedb = NULL;
+}
+
+/* setup */
+
+static void __init visfx_setup_info(struct pci_dev *pdev, struct fb_info *info)
 {
 	struct visfx_par *par = info->par;
 
@@ -1023,6 +1229,8 @@ static int __init visfx_init_device(struct pci_dev *pdev, struct sti_struct *sti
 		sti->info = info;
 
 	par = info->par;
+	par->info = info;
+
 	if (sti)
 		par->reg_base = pci_iomap(pdev, 0, VISFX_FB_OFFSET + VISFX_FB_LENGTH);
 	else
@@ -1047,12 +1255,15 @@ static int __init visfx_init_device(struct pci_dev *pdev, struct sti_struct *sti
 	info->var.bits_per_pixel = DEFAULT_BPP;
 
 printk("MODE OPTION %s\n", mode_option);
-	if (mode_option &&
-	    fb_find_mode(&info->var, info, mode_option, NULL, 0, NULL, DEFAULT_BPP) &&
-	    visfx_check_var(&info->var, info) == 0)
+	visfx_setup(info);
+	visfx_find_init_mode(info);
+	if (visfx_check_var(&info->var, info) == 0)
 		visfx_set_par(info);
 	else
-		visfx_setup(info);
+#if 0
+	if (mode_option &&
+	    fb_find_mode(&info->var, info, mode_option, NULL, 0, NULL, DEFAULT_BPP) &&
+#endif
 
 	visfx_get_video_mode(info);
 	info->var.accel_flags = info->flags;
@@ -1077,6 +1288,8 @@ printk("MODE OPTION %s\n", mode_option);
 err_out_dealloc_cmap:
 	fb_dealloc_cmap(&info->cmap);
 err_out_free:
+	visfx_delete_i2c_busses(par);
+	kfree(par->edid);
 	framebuffer_release(info);
 	return ret;
 }
@@ -1137,9 +1350,12 @@ static int __init visfx_options(char *options)
 static void __exit visfx_remove(struct pci_dev *pdev)
 {
 	struct fb_info *info = pci_get_drvdata(pdev);
+	struct visfx_par *par = info->par;
 
-	fb_dealloc_cmap(&info->cmap);
+	visfx_delete_i2c_busses(par);
 	unregister_framebuffer(info);
+	fb_dealloc_cmap(&info->cmap);
+	kfree(par->edid);
 	framebuffer_release(info);
 }
 
