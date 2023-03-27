@@ -143,6 +143,8 @@ palo lifimage: vmlinuz
 		false; \
 	fi
 	$(PALO) -f $(PALOCONF)
+	rm -f /tftpboot/vmlinux
+	cp lifimage /tftpboot/vmlinux
 
 BOOT_TARGETS    = zImage Image palo lifimage
 INSTALL_TARGETS = zinstall install

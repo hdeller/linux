@@ -1025,12 +1025,12 @@ static void visfx_setscl(void *data, int state)
 	struct visfx_par *par = data;
 	u32 val;
 
-	// val = visfx_readl(par->info, B2_DDC);
-	val = SCL_REG;
-	if (state)
+	val = visfx_readl(par->info, B2_DDC);
+// printk("scl = %d   %s\n", val, state?"On":"off");
+	if (!state)
 		val |= SCL_PIN;
 	else
-		val &= ~SCL_PIN;
+		val |= SCL_REG;
 	visfx_writel(par->info, B2_DDC, val);
 }
 
@@ -1039,12 +1039,12 @@ static void visfx_setsda(void *data, int state)
 	struct visfx_par *par = data;
 	u32 val;
 
-	// val = visfx_readl(par->info, B2_DDC);
-	val = SDA_REG;
-	if (state)
+	val = visfx_readl(par->info, B2_DDC);
+// printk("sda = %d   %s\n", val, state?"On":"off");
+	if (!state)
 		val |= SDA_PIN;
 	else
-		val &= ~SDA_PIN;
+		val |= SDA_REG;
 	visfx_writel(par->info, B2_DDC, val);
 }
 
@@ -1053,8 +1053,9 @@ static int visfx_getscl(void *data)
 	struct visfx_par *par = data;
 	u32 val = 0;
 
-	if (visfx_readl(par->info, B2_DDC) & SCL_PIN)
-		val = 1;
+	val = visfx_readl(par->info, B2_DDC);
+//  printk("scl = %d\n", val);
+	val &= SCL_PIN;
 
 	return val;
 }
@@ -1064,8 +1065,11 @@ static int visfx_getsda(void *data)
 	struct visfx_par *par = data;
 	u32 val = 0;
 
-	if (visfx_readl(par->info, B2_DDC) & SDA_PIN)
-		val = 1;
+	val = visfx_readl(par->info, B2_DDC);
+	val &= SDA_PIN;
+	// DDC-In in CFG register:
+	// val = visfx_readl(par->info, B2_CFG) & (1 << 17);
+// printk("sda = %d\n", val);
 
 	return val;
 }
@@ -1085,7 +1089,7 @@ static int visfx_setup_i2c_bus(struct visfx_par *par,
 	par->algo.setscl = visfx_setscl;
 	par->algo.getsda = visfx_getsda;
 	par->algo.getscl = visfx_getscl;
-	par->algo.udelay = 40;
+	par->algo.udelay = 30;
 	par->algo.timeout = msecs_to_jiffies(2);
 	par->algo.data = par;
 

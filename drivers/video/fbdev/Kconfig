@@ -564,6 +564,7 @@ config FB_STI
 config FB_VISUALIZEFX
 	tristate "HP Visualize FX support"
 	depends on FB && PCI && PARISC
+	select FB_DDC
 	select RATIONAL
 	  help
 	    Frame buffer driver for the HP Visualize FX cards. These cards are

@@ -257,6 +257,10 @@ static const struct fb_videomode modedb[] = {
 	{ NULL, 72, 480, 300, 33386, 40, 24, 11, 19, 80, 3, 0,
 		FB_VMODE_DOUBLE },
 
+	/* 1920x1080 @ 60 Hz, 67.3 kHz hsync */
+	{ NULL, 60, 1920, 1080, 6734, 148, 88, 63, 4, 44, 5, 0,
+		FB_SYNC_HOR_HIGH_ACT | FB_SYNC_VERT_HIGH_ACT },
+
 	/* 1920x1200 @ 60 Hz, 74.5 Khz hsync */
 	{ NULL, 60, 1920, 1200, 5177, 128, 336, 1, 38, 208, 3,
 		FB_SYNC_HOR_HIGH_ACT | FB_SYNC_VERT_HIGH_ACT,
@@ -282,6 +286,54 @@ static const struct fb_videomode modedb[] = {
 	/* 800x520i @ 50 Hz, 15.625 kHz hsync (PAL RGB) */
 	{ NULL, 50, 800, 520, 58823, 144, 64, 72, 28, 80, 5, 0,
 		FB_VMODE_INTERLACED },
+#if 0
+https://tldp.org/HOWTO/Framebuffer-HOWTO/x1274.html
+        Modeline "1280x1024" DCF   HR   SH1  SH2  HFL  VR   SV1  SV2  VFL
+        ModeLine "1920x1080" 148.5 1920 2008 2052 2200 1080 1084 1089 1125 +hsync +vsync
+
+    left_margin = HFL - SH2   148
+    right_margin = SH1 - HR    88
+    hsync_len = SH2 - SH1      44
+
+    upper_margin = VFL - SV2   63
+    lower_margin = SV1 - VR     4
+    vsync_len = SV2 - SV1       5
+
+        u32 xres;
+        u32 yres;
+        u32 pixclock;
+        u32 left_margin;
+        u32 right_margin;
+        u32 upper_margin;
+        u32 lower_margin;
+        u32 hsync_len;
+        u32 vsync_len;
+        u32 sync;
+        u32 vmode;
+        u32 flag;
+
+
+tandard resolution: 640x480 @ 60 Hz (established timing)
+Standard resolution: 640x480 @ 67 Hz (established timing)
+Standard resolution: 800x600 @ 56 Hz (established timing)
+Standard resolution: 800x600 @ 60 Hz (established timing)
+Standard resolution: 1024x768 @ 60 Hz (established timing)
+Standard resolution: 1152x720 @ 60 Hz, ratio 16/10 (!)
+Standard resolution: 1280x960 @ 60 Hz, ratio 4/3 (!)
+Standard resolution: 1280x1024 @ 60 Hz, ratio 5/4 (!)
+Standard resolution: 1600x1200 @ 60 Hz, ratio 4/3 (!)
+Standard resolution: 1680x1050 @ 60 Hz, ratio 16/10 (!)
+Standard resolution: 1440x900 @ 60 Hz, ratio 16/10 (!)
+Standard resolution: 1920x1080 @ 60 Hz, ratio 16/9
+Max video bandwidth: 170 MHz
+
+        HorizSync 30-83
+        VertRefresh 55-76
+
+        # Monitor preferred modeline (60.0 Hz vsync, 67.5 kHz hsync, ratio 16/9, 91 dpi)
+        ModeLine "1920x1080" 148.5 1920 2008 2052 2200 1080 1084 1089 1125 +hsync +vsync
+#endif
+
 
 	/* 864x480 @ 60 Hz, 35.15 kHz hsync */
 	{ NULL, 60, 864, 480, 27777, 1, 1, 1, 1, 0, 0,
