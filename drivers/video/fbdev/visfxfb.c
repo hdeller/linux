@@ -75,6 +75,7 @@ struct visfx_par {
 	struct visfx_default *defaults;
 	struct device *dev;
 	int open_count;
+	unsigned long debug_reg;
 
 	struct fb_info *info;
 	struct i2c_adapter adapter;
@@ -97,6 +98,46 @@ static void visfx_writel(struct fb_info *info, int reg, u32 val)
 
 	return writel(cpu_to_le32(val), par->reg_base + reg);
 }
+
+static ssize_t visfx_sysfs_show_reg(struct device *dev,
+				    struct device_attribute *attr,
+				    char *buf)
+{
+	struct fb_info *info = pci_get_drvdata(to_pci_dev(dev));
+	struct visfx_par *par = info->par;
+
+	return sprintf(buf, "%08x\n", visfx_readl(info, par->debug_reg));
+}
+
+static ssize_t visfx_sysfs_store_reg(struct device *dev,
+				     struct device_attribute *attr,
+				     const char *buf, size_t count)
+{
+	struct fb_info *info = pci_get_drvdata(to_pci_dev(dev));
+	struct visfx_par *par = info->par;
+	unsigned long data;
+	char *p;
+
+	p = strchr(buf, '=');
+	if (p)
+		*p = '\0';
+
+	if (kstrtoul(buf, 16, &par->debug_reg))
+		return -EINVAL;
+
+	if (par->debug_reg >= VISFX_FB_LENGTH)
+		return -EINVAL;
+
+	if (p) {
+		if (kstrtoul(p+1, 16, &data))
+			return -EINVAL;
+		visfx_writel(info, par->debug_reg, data);
+	}
+	return count;
+}
+
+static DEVICE_ATTR(reg, 0600, visfx_sysfs_show_reg, visfx_sysfs_store_reg);
+
 
 static void visfx_write_vram(struct fb_info *info, int reg, u32 val)
 {
@@ -657,7 +698,7 @@ int visfx_set_default_mode(struct fb_info *info)
 	visfx_writel(info, B2_SCR, visfx_readl(info, 0x5004c));
 	tmp = visfx_readl(info, 0x50054);
 	visfx_writel(info, B2_IBMAP0, tmp);
-	visfx_writel(info, B2_IMD, tmp);
+	visfx_writel(info, B2_IMD, 2);
 	visfx_writel(info, B2_BMAP_BABoth, tmp);
 	return 0;
 }
@@ -889,7 +930,7 @@ static void visfx_setup(struct fb_info *info)
 // con2fbmap
 
 	visfx_writel(info, B2_IBMAP0, par->bmap_dba);
-	visfx_writel(info, B2_IMD, par->bmap_dba);
+	visfx_writel(info, B2_IMD, 2);
 	visfx_writel(info, B2_BMAP_BABoth, par->bmap_dba);  // WOW !!!!!
 
 	visfx_writel(info, B2_DBA, par->dba);
@@ -1025,12 +1066,13 @@ static void visfx_setscl(void *data, int state)
 	struct visfx_par *par = data;
 	u32 val;
 
-	val = visfx_readl(par->info, B2_DDC);
+//	val = visfx_readl(par->info, B2_DDC);
 // printk("scl = %d   %s\n", val, state?"On":"off");
-	if (!state)
-		val |= SCL_PIN;
-	else
+	val = SCL_PIN;
+	if (state)
 		val |= SCL_REG;
+	else
+		val &= ~SCL_REG;
 	visfx_writel(par->info, B2_DDC, val);
 }
 
@@ -1039,12 +1081,13 @@ static void visfx_setsda(void *data, int state)
 	struct visfx_par *par = data;
 	u32 val;
 
-	val = visfx_readl(par->info, B2_DDC);
+//	val = visfx_readl(par->info, B2_DDC);
 // printk("sda = %d   %s\n", val, state?"On":"off");
-	if (!state)
-		val |= SDA_PIN;
-	else
+	val = SDA_PIN;
+	if (state)
 		val |= SDA_REG;
+	else
+		val &= ~SDA_REG;
 	visfx_writel(par->info, B2_DDC, val);
 }
 
@@ -1054,8 +1097,8 @@ static int visfx_getscl(void *data)
 	u32 val = 0;
 
 	val = visfx_readl(par->info, B2_DDC);
+	val = (val & SCL_PIN) ? 1 : 0;
 //  printk("scl = %d\n", val);
-	val &= SCL_PIN;
 
 	return val;
 }
@@ -1066,9 +1109,7 @@ static int visfx_getsda(void *data)
 	u32 val = 0;
 
 	val = visfx_readl(par->info, B2_DDC);
-	val &= SDA_PIN;
-	// DDC-In in CFG register:
-	// val = visfx_readl(par->info, B2_CFG) & (1 << 17);
+	val = (val & SDA_PIN) ? 1 : 0;
 // printk("sda = %d\n", val);
 
 	return val;
@@ -1089,8 +1130,8 @@ static int visfx_setup_i2c_bus(struct visfx_par *par,
 	par->algo.setscl = visfx_setscl;
 	par->algo.getsda = visfx_getsda;
 	par->algo.getscl = visfx_getscl;
-	par->algo.udelay = 30;
-	par->algo.timeout = msecs_to_jiffies(2);
+	par->algo.udelay = 10;
+	par->algo.timeout = 20; // msecs_to_jiffies(2);
 	par->algo.data = par;
 
 	i2c_set_adapdata(&par->adapter, par);
@@ -1128,7 +1169,7 @@ static int __init visfx_probe_i2c_connector(struct fb_info *info, u8 **out_edid)
 	u8 *edid;
 
 	edid = fb_ddc_read(&par->adapter);
-printk("edid1 %px    %*ph\n", edid, 64, edid);
+printk("edid1 %px    %*ph\n", edid, 20, edid);
 
 	*out_edid = edid;
 
@@ -1182,7 +1223,8 @@ printk("Monitor:  %s\n", specs->monitor);
 		fb_videomode_to_var(&var, &mode);
 	}
 
-mode_option="1366x768";
+if (!mode_option)
+		mode_option="1366x768";
 	if (mode_option)
 		fb_find_mode(&var, info, mode_option, specs->modedb,
 			     specs->modedb_len, (found) ? &mode : NULL,
@@ -1287,6 +1329,8 @@ printk("MODE OPTION %s\n", mode_option);
                 info->fix.id,
                 info->fix.mmio_start);
 
+	device_create_file(&pdev->dev, &dev_attr_reg);
+
 	return 0;
 
 err_out_dealloc_cmap:
@@ -1338,6 +1382,7 @@ static void visfx_probe_sti(struct sti_struct *sti, int enable)
 		fb_dealloc_cmap(&info->cmap);
 		unregister_framebuffer(info);
 		framebuffer_release(info);
+		device_remove_file(info->dev, &dev_attr_reg);
 	}
 }
 
@@ -1361,6 +1406,7 @@ static void __exit visfx_remove(struct pci_dev *pdev)
 	fb_dealloc_cmap(&info->cmap);
 	kfree(par->edid);
 	framebuffer_release(info);
+	device_remove_file(&pdev->dev, &dev_attr_reg);
 }
 
 static const struct pci_device_id visfx_pci_tbl[] = {
