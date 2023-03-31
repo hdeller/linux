@@ -1056,19 +1056,18 @@ static int __init visfx_check_defaults(struct fb_info *info)
 
 /* DDC support */
 
-#define SCL_PIN		(1 << 3)
-#define SDA_PIN		(1 << 2)
-#define SCL_REG		(1 << 1)
-#define SDA_REG		(1 << 0)
+#define SCL_PIN		BIT(3)
+#define SDA_PIN		BIT(2)
+#define SCL_REG		BIT(1)
+#define SDA_REG		BIT(0)
+#define DDC_MASK	(SCL_REG | SDA_REG);
 
 static void visfx_setscl(void *data, int state)
 {
 	struct visfx_par *par = data;
 	u32 val;
 
-//	val = visfx_readl(par->info, B2_DDC);
-// printk("scl = %d   %s\n", val, state?"On":"off");
-	val = SCL_PIN;
+	val = visfx_readl(par->info, B2_DDC) & DDC_MASK;
 	if (state)
 		val |= SCL_REG;
 	else
@@ -1081,9 +1080,7 @@ static void visfx_setsda(void *data, int state)
 	struct visfx_par *par = data;
 	u32 val;
 
-//	val = visfx_readl(par->info, B2_DDC);
-// printk("sda = %d   %s\n", val, state?"On":"off");
-	val = SDA_PIN;
+	val = visfx_readl(par->info, B2_DDC) & DDC_MASK;
 	if (state)
 		val |= SDA_REG;
 	else
@@ -1131,7 +1128,7 @@ static int visfx_setup_i2c_bus(struct visfx_par *par,
 	par->algo.getsda = visfx_getsda;
 	par->algo.getscl = visfx_getscl;
 	par->algo.udelay = 10;
-	par->algo.timeout = 20; // msecs_to_jiffies(2);
+	par->algo.timeout = msecs_to_jiffies(2);
 	par->algo.data = par;
 
 	i2c_set_adapdata(&par->adapter, par);
