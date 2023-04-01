@@ -99,7 +99,13 @@ static void visfx_writel(struct fb_info *info, int reg, u32 val)
 	return writel(cpu_to_le32(val), par->reg_base + reg);
 }
 
-static ssize_t visfx_sysfs_show_reg(struct device *dev,
+static void visfx_writel_dump(struct fb_info *info, int reg, u32 val, u32 reference)
+{
+	printk("DUMP  reg %08x <- %08x,   reference %08x\n", reg, val, reference);
+	return visfx_writel(info, reg, val);
+}
+
+static ssize_t visfx_sysfs_show(struct device *dev,
 				    struct device_attribute *attr,
 				    char *buf)
 {
@@ -109,7 +115,7 @@ static ssize_t visfx_sysfs_show_reg(struct device *dev,
 	return sprintf(buf, "%08x\n", visfx_readl(info, par->debug_reg));
 }
 
-static ssize_t visfx_sysfs_store_reg(struct device *dev,
+static ssize_t visfx_sysfs_store(struct device *dev,
 				     struct device_attribute *attr,
 				     const char *buf, size_t count)
 {
@@ -136,7 +142,8 @@ static ssize_t visfx_sysfs_store_reg(struct device *dev,
 	return count;
 }
 
-static DEVICE_ATTR(reg, 0600, visfx_sysfs_show_reg, visfx_sysfs_store_reg);
+// static DEVICE_ATTR(reg, 0600, visfx_sysfs_show_reg, visfx_sysfs_store_reg);
+static DEVICE_ATTR_ADMIN_RW(visfx_sysfs);
 
 
 static void visfx_write_vram(struct fb_info *info, int reg, u32 val)
@@ -397,7 +404,10 @@ static int visfx_init_pll(struct fb_info *info, u32 reg, u32 value1, u32 value2)
 {
 	int ret;
 
-	visfx_writel(info, reg, value1);
+	if (reg == B2_PLL_DOT_CTL)
+		visfx_writel_dump(info, reg, value1, 0x527b0c);
+	else
+		visfx_writel(info, reg, value1);
 	ret = visfx_wait_pll(info);
 	if (ret)
 		return ret;
@@ -429,21 +439,27 @@ static int visfx_set_par(struct fb_info *info)
 	xres = var->xres;
 	yres = var->yres;
 	hsw = var->hsync_len / 4 - 1;
-	hfp = var->right_margin - 1;
+	hfp = (var->right_margin - 1) & 0x1ff;
 	hbp = var->left_margin - 1;
 	vsw = var->vsync_len - 1;
 	vfp = var->lower_margin - 1;
 	vbp = var->upper_margin - 1;
+printk("hsync_len  %d\n", var->hsync_len);
+printk("vsync_len  %d\n", var->vsync_len);
+printk("left_margi   %d   %d  \n", var->left_margin, var->right_margin);
+printk("up/low_margi   %d   %d  \n", var->upper_margin, var->lower_margin);
 
 printk("visfx_set_par %dx%d-%d\n", xres, yres, var->bits_per_pixel);
 
-	ret = visfx_set_pll(info, B2_PLL_DOT_CTL, var->pixclock);
+	ret = visfx_set_pll(info, B2_PLL_DOT_CTL, var->pixclock); // 00527b0c
 	if (ret)
 		return ret;
 
-	visfx_writel(info, B2_VHAL, ((yres - 1) << 16) | (xres - 1));
-	visfx_writel(info, B2_HTG, (hbp << 20) | (hsw << 12) | (0xc << 8) | hfp);
-	visfx_writel(info, B2_VTG, (vbp << 16) | (vsw << 8) | vfp);
+	visfx_writel_dump(info, B2_HTG, (hbp << 20) | (hsw << 12) | (0xc << 8) | hfp, 0x14f33c7f);
+	visfx_writel_dump(info, B2_VTG, (vbp << 0) | (vsw << 8) | (vfp << 16), 0x260200); // vertauscht!!
+	visfx_writel_dump(info, B2_VHAL,((yres - 1) << 16) | (xres - 1), 0x437077f);
+	visfx_writel_dump(info, B2_ETG, 0x12260, 0);
+	visfx_writel(info, B2_SCR, 0);
 	visfx_wclip(info, 0, 0, xres, yres);
 
 	tmp = VISFX_DFP_ENABLE;
@@ -451,9 +467,9 @@ printk("visfx_set_par %dx%d-%d\n", xres, yres, var->bits_per_pixel);
 		tmp |= VISFX_HSYNC_POSITIVE;
 	if (var->sync & FB_SYNC_VERT_HIGH_ACT)
 		tmp |= VISFX_VSYNC_POSITIVE;
-	visfx_writel(info, B2_CFG, tmp);
+	visfx_writel_dump(info, B2_CFG, tmp, 0);
 	visfx_writel(info, B2_MPC, 0xc);
-	visfx_get_video_mode(info);
+	// visfx_get_video_mode(info);
 
 	visfx_setup(info);
 
@@ -688,16 +704,20 @@ int visfx_set_default_mode(struct fb_info *info)
 
 	visfx_writel(info, B2_HTG, visfx_readl(info, 0x50038));
 	visfx_writel(info, B2_VTG, visfx_readl(info, 0x5003c));
-	visfx_writel(info, B2_CFG, visfx_readl(info, 0x50040));
+	visfx_writel(info, B2_CFG, visfx_readl(info, 0x50040)); // 0 ??
 
 	tmp = (visfx_readl(info, 0x50024) & 0xffff0000) |
 		(visfx_readl(info, 0x50020) & 0xffff);
 
+printk("SIZE %d x %d\n", tmp >> 16, tmp & 0xffff);
+
 	visfx_writel(info, B2_VHAL, tmp - 0x10001);
+printk("ETG = %x \n", visfx_readl(info, 0x50044));
+
 	visfx_writel(info, B2_ETG, visfx_readl(info, 0x50044));
 	visfx_writel(info, B2_SCR, visfx_readl(info, 0x5004c));
 	tmp = visfx_readl(info, 0x50054);
-	visfx_writel(info, B2_IBMAP0, tmp);
+	visfx_writel(info, B2_IBMAP0, (tmp = 0x20003c0)); // tmp);
 	visfx_writel(info, B2_IMD, 2);
 	visfx_writel(info, B2_BMAP_BABoth, tmp);
 	return 0;
@@ -734,10 +754,10 @@ static void visfx_clear_buffer(struct fb_info *info, u32 dba, u32 bmap_dba, u32 
 	visfx_writel(info, B2_MBWB, mbwb);
 	visfx_writel(info, B2_DBA, dba | 0x1000);
 	visfx_writel(info, B2_MNOOP_R0R1, 0);
-	visfx_writel(info, B2_SOLIDFILL_R2R3_REMAP, 0x06400240);
+	visfx_writel(info, B2_SOLIDFILL_R2R3_REMAP, 1920<<16 | 576); // 0x06400240);
 	visfx_writel(info, B2_DBA, 0x05000880);
-	visfx_writel(info, B2_MNOOP_R0R1, 0x480);
-	visfx_writel(info, B2_SOLIDFILL_R2R3_REMAP, 0x06400030);
+	visfx_writel(info, B2_MNOOP_R0R1, 1152); // 0x480);
+	visfx_writel(info, B2_SOLIDFILL_R2R3_REMAP, 1920<<16 | 48); //0x06400030);
 }
 
 static void visfx_setup_x11_pattern(struct fb_info *info)
@@ -807,13 +827,16 @@ static void visfx_setup(struct fb_info *info)
 	visfx_writel(info, UP_CF_STATE, 0x02000000);
 	visfx_writel(info, B2_VBS, 1);
 
-	visfx_setup_and_wait(info, B2_ABMAP, 0x20200);
+	// ABMAP: 0x20200=ohne Overlay,  0x1e0=mit overlay
+	// visfx_setup_and_wait(info, B2_ABMAP, 0x20200);
+	visfx_setup_and_wait(info, B2_ABMAP, 0x1e0); // 0x20200);
 	visfx_setup_and_wait(info, B2_IBMAP0, 0x02680e02);
 	visfx_setup_and_wait(info, B2_BMAP_Z, 0x13080e06);
 	visfx_setup_and_wait(info, B2_OBMAP0, 0x23a80380);
 	visfx_setup_and_wait(info, UP_CF_STATE, 0x00000000);
 	visfx_setup_and_wait(info, B2_IBMAP1, 0x27d00e02);
 	visfx_setup_and_wait(info, B2_DUM, 0x81030002);
+	// visfx_setup_and_wait(info, B2_DUM, 0); // keine Auswirkung?
 	visfx_setup_and_wait(info, B2_OXYO, 0);
 
 	visfx_writel(info, B2_PMASK, 0xff);
@@ -846,7 +869,7 @@ static void visfx_setup(struct fb_info *info)
 	visfx_setup_x11_pattern(info);
 
 	visfx_clear_buffer(info, 0x00000a00, 0x02680e02, 0x03f00000, 0);
-	visfx_wclip(info, 0, 0, 1600, 1200); // FIXME
+	visfx_wclip(info, 0, 0, 1920, 1200); // FIXME 1600, 1200
 	visfx_clear_buffer(info, 0x05000880, 0x23a80380, 0x00fc0000, 0xffffffff);
 	visfx_buffer_setup(info, 2, 0, 0x08000084, 0);
 
@@ -861,10 +884,10 @@ static void visfx_setup(struct fb_info *info)
 	visfx_writel(info, B2_MBWB, 0x00900000);
 	visfx_writel(info, B2_DBA, 0x05001880);
 	visfx_writel(info, B2_MNOOP_R0R1, 0);
-	visfx_writel(info, B2_SOLIDFILL_R2R3_REMAP, 0x03200240);
+	visfx_writel(info, B2_SOLIDFILL_R2R3_REMAP, 800<<16 | 576); // 0x03200240);
 	visfx_writel(info, B2_DBA, 0x05000880);
 	visfx_writel(info, B2_MNOOP_R0R1, 0x480);
-	visfx_writel(info, B2_SOLIDFILL_R2R3_REMAP, 0x03200030);
+	visfx_writel(info, B2_SOLIDFILL_R2R3_REMAP, 800<<16 | 48); // 0x03200030);
 	visfx_wait_write_pipe_empty(info);
 	visfx_writel(info, B2_BMAP_DBA, 0x02680e02);
 
@@ -1326,7 +1349,8 @@ printk("MODE OPTION %s\n", mode_option);
                 info->fix.id,
                 info->fix.mmio_start);
 
-	device_create_file(&pdev->dev, &dev_attr_reg);
+	if (device_create_file(&pdev->dev, &dev_attr_visfx_sysfs))
+		dev_err(&pdev->dev, "Can't create sysfs regdump file\n");
 
 	return 0;
 
@@ -1379,7 +1403,7 @@ static void visfx_probe_sti(struct sti_struct *sti, int enable)
 		fb_dealloc_cmap(&info->cmap);
 		unregister_framebuffer(info);
 		framebuffer_release(info);
-		device_remove_file(info->dev, &dev_attr_reg);
+		device_remove_file(info->dev, &dev_attr_visfx_sysfs);
 	}
 }
 
@@ -1403,7 +1427,7 @@ static void __exit visfx_remove(struct pci_dev *pdev)
 	fb_dealloc_cmap(&info->cmap);
 	kfree(par->edid);
 	framebuffer_release(info);
-	device_remove_file(&pdev->dev, &dev_attr_reg);
+	device_remove_file(&pdev->dev, &dev_attr_visfx_sysfs);
 }
 
 static const struct pci_device_id visfx_pci_tbl[] = {
