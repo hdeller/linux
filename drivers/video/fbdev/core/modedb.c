@@ -945,8 +945,7 @@ void fb_var_to_videomode(struct fb_videomode *mode,
 void fb_videomode_to_var(struct fb_var_screeninfo *var,
 			 const struct fb_videomode *mode)
 {
-	if (!mode)
-		return;
+	// if (!mode) return;
 	var->xres = mode->xres;
 	var->yres = mode->yres;
 	var->xres_virtual = mode->xres;

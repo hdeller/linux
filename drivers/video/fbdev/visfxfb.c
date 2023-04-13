@@ -49,6 +49,8 @@
 
 #define DEFAULT_BPP	32
 
+#define SYSFS		0
+
 static char *mode_option; /* empty means take video mode from ROM */
 
 struct visfx_default {
@@ -70,6 +72,7 @@ struct visfx_default {
 struct visfx_par {
 	void __iomem *reg_base;
 	unsigned long reg_size;
+	u32 abmap, ibmap0, bmap_z, ibmap1, obmap0;
 	u32 dba, bmap_dba;
 	u32 pseudo_palette[NR_PALETTE];
 	struct visfx_default *defaults;
@@ -101,7 +104,7 @@ static void visfx_writel(struct fb_info *info, int reg, u32 val)
 
 static void visfx_writel_dump(struct fb_info *info, int reg, u32 val, u32 reference)
 {
-	printk("DUMP  reg %08x <- %08x,   reference %08x\n", reg, val, reference);
+	// printk("DUMP  reg %08x <- %08x,   reference %08x\n", reg, val, reference);
 	return visfx_writel(info, reg, val);
 }
 
@@ -286,7 +289,7 @@ static int visfx_setcmap(struct fb_cmap *cmap, struct fb_info *info)
 	if (info->fix.visual != FB_VISUAL_PSEUDOCOLOR)
 		return -EINVAL;
 
- printk("visfx_setcmap start %d  len = %d\n", cmap->start, cmap->len);
+//  printk("visfx_setcmap start %d  len = %d\n", cmap->start, cmap->len);
 	visfx_writel(info, B2_LLCA, cmap->start);
 
 	for (i = 0; i < cmap->len; i++) {
@@ -444,12 +447,11 @@ static int visfx_set_par(struct fb_info *info)
 	vsw = var->vsync_len - 1;
 	vfp = var->lower_margin - 1;
 	vbp = var->upper_margin - 1;
-printk("hsync_len  %d\n", var->hsync_len);
-printk("vsync_len  %d\n", var->vsync_len);
-printk("left_margi   %d   %d  \n", var->left_margin, var->right_margin);
-printk("up/low_margi   %d   %d  \n", var->upper_margin, var->lower_margin);
-
-printk("visfx_set_par %dx%d-%d\n", xres, yres, var->bits_per_pixel);
+// printk("hsync_len  %d\n", var->hsync_len);
+// printk("vsync_len  %d\n", var->vsync_len);
+// printk("left_margi   %d   %d  \n", var->left_margin, var->right_margin);
+// printk("up/low_margi   %d   %d  \n", var->upper_margin, var->lower_margin);
+// printk("visfx_set_par %dx%d-%d\n", xres, yres, var->bits_per_pixel);
 
 	ret = visfx_set_pll(info, B2_PLL_DOT_CTL, var->pixclock); // 00527b0c
 	if (ret)
@@ -717,9 +719,9 @@ printk("ETG = %x \n", visfx_readl(info, 0x50044));
 	visfx_writel(info, B2_ETG, visfx_readl(info, 0x50044));
 	visfx_writel(info, B2_SCR, visfx_readl(info, 0x5004c));
 	tmp = visfx_readl(info, 0x50054);
-	visfx_writel(info, B2_IBMAP0, (tmp = 0x20003c0)); // tmp);
+//	visfx_writel(info, B2_IBMAP0, (tmp = 0x20003c0)); // tmp);
 	visfx_writel(info, B2_IMD, 2);
-	visfx_writel(info, B2_BMAP_BABoth, tmp);
+//	visfx_writel(info, B2_BMAP_BABoth, tmp);
 	return 0;
 }
 
@@ -780,7 +782,7 @@ static void visfx_setup(struct fb_info *info)
 
 #ifdef __BIG_ENDIAN
 	// SEite 238
-	if (1 || var->bits_per_pixel == 32) {
+	if (var->bits_per_pixel == 32) {
 		visfx_writel(info, B2_DMA_BSCFB, DSM_NO_BYTE_SWAP);
 		visfx_writel(info, B2_PDU_BSCFB, DSM_NO_BYTE_SWAP);
 	} else {
@@ -815,7 +817,7 @@ static void visfx_setup(struct fb_info *info)
 	visfx_writel(info, B2_SB, 0);
 	visfx_writel(info, B2_WCE, 0);
 	visfx_writel(info, B2_CPE, 0);
-	visfx_writel(info, B2_ZBO, 0x00080000);
+	visfx_writel(info, B2_ZBO, 0x00080000); // oder 0x66666666 oder 0x3010030f
 	visfx_writel(info, B2_RTG_MEM_LOAD, 0xc9200); // bits 21:2 of host address XXX
 	visfx_writel(info, B2_TM_TSS, 0);
 	visfx_writel(info, B2_FCDA, 0);
@@ -827,14 +829,23 @@ static void visfx_setup(struct fb_info *info)
 	visfx_writel(info, UP_CF_STATE, 0x02000000);
 	visfx_writel(info, B2_VBS, 1);
 
-	// ABMAP: 0x20200=ohne Overlay,  0x1e0=mit overlay
-	// visfx_setup_and_wait(info, B2_ABMAP, 0x20200);
-	visfx_setup_and_wait(info, B2_ABMAP, 0x1e0); // 0x20200);
-	visfx_setup_and_wait(info, B2_IBMAP0, 0x02680e02);
-	visfx_setup_and_wait(info, B2_BMAP_Z, 0x13080e06);
-	visfx_setup_and_wait(info, B2_OBMAP0, 0x23a80380);
+	// ABMAP: 0x20200=ohne Overlay,
+	// 0x1e0=mit overlay bei 1920x
+	// 0x1a0=mit overlay bei 1600x
+	// 0x140=mit overlay bei 1280x
+	// 0x100=mit overlay bei 1024x
+	par->abmap  = 0x1e0;
+	par->ibmap0 = 0x02680e02;
+	par->bmap_z = 0x13080e06;
+	par->obmap0 = 0x23a80380;
+	par->ibmap1 = 0x27d00e02;
+
+	visfx_setup_and_wait(info, B2_ABMAP, par->abmap);
+	visfx_setup_and_wait(info, B2_IBMAP0, par->ibmap0);
+	visfx_setup_and_wait(info, B2_BMAP_Z, par->bmap_z);
+	visfx_setup_and_wait(info, B2_OBMAP0, par->obmap0);
 	visfx_setup_and_wait(info, UP_CF_STATE, 0x00000000);
-	visfx_setup_and_wait(info, B2_IBMAP1, 0x27d00e02);
+	visfx_setup_and_wait(info, B2_IBMAP1, par->ibmap1);
 	visfx_setup_and_wait(info, B2_DUM, 0x81030002);
 	// visfx_setup_and_wait(info, B2_DUM, 0); // keine Auswirkung?
 	visfx_setup_and_wait(info, B2_OXYO, 0);
@@ -845,15 +856,15 @@ static void visfx_setup(struct fb_info *info)
 	for (i = 0; i < 7; i++)
 		visfx_buffer_setup(info, i, 0, 0, 0);
 
-	visfx_buffer_setup(info, 0, 0x09000004, 0, 0);
+	visfx_buffer_setup(info, 0, 0x09000004, 0, 0); // 0x2000000 bei nicht true/directcolor
 	visfx_buffer_setup(info, 1, 0x09000004, 1, 0);
 	visfx_setup_and_wait(info, B2_OMC, (1 << 25));
 	visfx_writel(info, B2_OTLS, 2);
 	visfx_writel(info, B2_OBS, 0);
 
-	visfx_clear_buffer(info, 0x05000880, 0x02680e02, 0x03f00000, 0);
-	visfx_clear_buffer(info, 0x05000880, 0x23a80380, 0x00fc0000, 0);
-	visfx_clear_buffer(info, 0x05000880, 0x00020200, 0x00900000, 0);
+	visfx_clear_buffer(info, 0x05000880, par->ibmap0, 0x03f00000, 0);
+	visfx_clear_buffer(info, 0x05000880, par->obmap0, 0x00fc0000, 0);
+	visfx_clear_buffer(info, 0x05000880, par->abmap,  0x00900000, 0);
 
 	visfx_writel(info, B2_PMASK, 0xff);
 	visfx_writel(info, B2_FATTR, 0);
@@ -868,15 +879,17 @@ static void visfx_setup(struct fb_info *info)
 
 	visfx_setup_x11_pattern(info);
 
-	visfx_clear_buffer(info, 0x00000a00, 0x02680e02, 0x03f00000, 0);
-	visfx_wclip(info, 0, 0, 1920, 1200); // FIXME 1600, 1200
-	visfx_clear_buffer(info, 0x05000880, 0x23a80380, 0x00fc0000, 0xffffffff);
-	visfx_buffer_setup(info, 2, 0, 0x08000084, 0);
+	visfx_clear_buffer(info, 0x00000a00, par->ibmap0, 0x03f00000, 0);
+	visfx_wclip(info, 0, 0, var->xres, var->yres);
+	visfx_clear_buffer(info, 0x05000880, par->obmap0, 0x00fc0000, 0xffffffff);
+	visfx_buffer_setup(info, 2, 0x08000084, 0, 0);  // XXX vertauscht !!   8000084 für Overlay
+	// visfx_buffer_setup(info, 2, 0, 0x08000084, 0);  // XXX vertauscht !!   8000084 für Overlay
 
+#if 1
 	visfx_writel(info, B2_WCE, 0);
 	visfx_writel(info, B2_SOV, 0);
 	visfx_writel(info, B2_DBA, 0x05000880);
-	visfx_writel(info, B2_BMAP_DBA, 0x20200);
+	visfx_writel(info, B2_BMAP_DBA, par->abmap);
 
 	visfx_writel(info, B2_IFC, 0x00000000);
 	visfx_writel(info, B2_IPM, 0xffffffff);
@@ -889,7 +902,8 @@ static void visfx_setup(struct fb_info *info)
 	visfx_writel(info, B2_MNOOP_R0R1, 0x480);
 	visfx_writel(info, B2_SOLIDFILL_R2R3_REMAP, 800<<16 | 48); // 0x03200030);
 	visfx_wait_write_pipe_empty(info);
-	visfx_writel(info, B2_BMAP_DBA, 0x02680e02);
+#endif
+	visfx_writel(info, B2_BMAP_DBA, par->ibmap0);
 
 	info->fix.accel = FB_ACCEL_NONE;
 	info->fix.type = FB_TYPE_PACKED_PIXELS;
@@ -930,33 +944,32 @@ static void visfx_setup(struct fb_info *info)
 		visfx_writel(info, B2_EN2D, B2_EN2D_WORD_MODE);
 		par->dba = B2_DBA_BIN8F | B2_DBA_OTC01 | B2_DBA_DIRECT | B2_DBA_D;
 		visfx_writel(info, B2_SBA, B2_DBA_BIN8F | B2_DBA_OTC01);
-		par->bmap_dba = 0x02680e02;
+		par->bmap_dba = par->ibmap0;
 		visfx_writel(info, B2_OTR, 1<<8 | 0); // ???  Seite 382, Overlay immer durchsichtig !!
 		visfx_writel(info, B2_FATTR, 0);
 	} else { /* 8-bit indexed: */
 		visfx_writel(info, B2_EN2D, B2_EN2D_BYTE_MODE);
 		visfx_writel(info, B2_SBA, B2_DBA_BIN8I | B2_DBA_OTC04);
 		par->dba = B2_DBA_BIN8I | B2_DBA_OTC04 | B2_DBA_DIRECT | B2_DBA_D;  // doch OCT01 ???
-		visfx_writel(info, B2_BABoth, par->dba);
+		// visfx_writel(info, B2_BABoth, par->dba);
 		visfx_writel(info, B2_BPM, 0xffffffff);
 		visfx_writel(info, B2_OTR, 1<<16 | 3); // ???  Seite 382, 3=immer undurchsichtig !!
 		// IAA0 -> Seite 383 -> 
 		// visfx_writel(info, B2_CFS16, 0x40); // mode=4, LUT=3 LUT auswählen
 		visfx_writel(info, B2_CFS16, 0x0); // mode=4, LUT=3 LUT auswählen
 		visfx_writel(info, B2_FATTR, 1<<7 | 1<<4); // -> CFS16  -> force Overlay!
-		par->bmap_dba = 0x02680e02;
-		par->bmap_dba = 0x01400280;
-		par->bmap_dba = 0x00000200;
-		par->bmap_dba = 0x80000200; // <- am besten
-		par->bmap_dba = 0x80000800; // <- am besten, aber kein pattern und direct !!
+		par->bmap_dba = par->obmap0;
 	}
 // con2fbmap
 
-	visfx_writel(info, B2_IBMAP0, par->bmap_dba);
-	visfx_writel(info, B2_IMD, 2);
+// printk("BMAP_DBA   = %08x\n", par->dba);
+// printk("BMAP_IBMAP = %08x\n", par->ibmap);
+//	visfx_writel(info, B2_IBMAP0, par->ibmap);
+//	visfx_writel(info, B2_IMD, 2);
 	visfx_writel(info, B2_BMAP_BABoth, par->bmap_dba);  // WOW !!!!!
 
-	visfx_writel(info, B2_DBA, par->dba);
+	// visfx_writel(info, B2_DBA, par->dba);
+	visfx_writel(info, B2_BABoth, par->dba);
 	visfx_writel(info, B2_IPM, 0xffffffff); /* all bits/planes relevant, incl. A-mask */
 }
 
@@ -1349,7 +1362,7 @@ printk("MODE OPTION %s\n", mode_option);
                 info->fix.id,
                 info->fix.mmio_start);
 
-	if (device_create_file(&pdev->dev, &dev_attr_visfx_sysfs))
+	if (SYSFS && device_create_file(&pdev->dev, &dev_attr_visfx_sysfs))
 		dev_err(&pdev->dev, "Can't create sysfs regdump file\n");
 
 	return 0;
@@ -1403,7 +1416,7 @@ static void visfx_probe_sti(struct sti_struct *sti, int enable)
 		fb_dealloc_cmap(&info->cmap);
 		unregister_framebuffer(info);
 		framebuffer_release(info);
-		device_remove_file(info->dev, &dev_attr_visfx_sysfs);
+		if (SYSFS) device_remove_file(info->dev, &dev_attr_visfx_sysfs);
 	}
 }
 
@@ -1427,7 +1440,7 @@ static void __exit visfx_remove(struct pci_dev *pdev)
 	fb_dealloc_cmap(&info->cmap);
 	kfree(par->edid);
 	framebuffer_release(info);
-	device_remove_file(&pdev->dev, &dev_attr_visfx_sysfs);
+	if (SYSFS) device_remove_file(&pdev->dev, &dev_attr_visfx_sysfs);
 }
 
 static const struct pci_device_id visfx_pci_tbl[] = {
