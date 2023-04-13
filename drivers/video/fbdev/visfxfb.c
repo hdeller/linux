@@ -834,11 +834,11 @@ static void visfx_setup(struct fb_info *info)
 	// 0x1a0=mit overlay bei 1600x
 	// 0x140=mit overlay bei 1280x
 	// 0x100=mit overlay bei 1024x
-	par->abmap  = 0x1e0;
-	par->ibmap0 = 0x02680e02;
-	par->bmap_z = 0x13080e06;
-	par->obmap0 = 0x23a80380;
-	par->ibmap1 = 0x27d00e02;
+	par->abmap  = 0x1e0;  // wichtig bei 1920@32bpp
+	par->ibmap0 = 0x02681002;
+	par->bmap_z = 0x13090006;
+	par->obmap0 = 0x23aa0000;
+	par->ibmap1 = 0x27e00002;
 
 	visfx_setup_and_wait(info, B2_ABMAP, par->abmap);
 	visfx_setup_and_wait(info, B2_IBMAP0, par->ibmap0);
