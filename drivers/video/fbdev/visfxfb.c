@@ -711,10 +711,8 @@ int visfx_set_default_mode(struct fb_info *info)
 	tmp = (visfx_readl(info, 0x50024) & 0xffff0000) |
 		(visfx_readl(info, 0x50020) & 0xffff);
 
-printk("SIZE %d x %d\n", tmp >> 16, tmp & 0xffff);
 
 	visfx_writel(info, B2_VHAL, tmp - 0x10001);
-printk("ETG = %x \n", visfx_readl(info, 0x50044));
 
 	visfx_writel(info, B2_ETG, visfx_readl(info, 0x50044));
 	visfx_writel(info, B2_SCR, visfx_readl(info, 0x5004c));
@@ -830,21 +828,17 @@ static void visfx_setup(struct fb_info *info)
 	visfx_writel(info, B2_VBS, 1);
 
 	// ABMAP: 0x20200=ohne Overlay,
-	// 0x1e0=mit overlay bei 1920x
-	// 0x1a0=mit overlay bei 1600x
-	// 0x140=mit overlay bei 1280x
-	// 0x100=mit overlay bei 1024x
-	par->abmap  = 0x1e0;  // wichtig bei 1920@32bpp
+	par->abmap  = var->xres / 4;	/* XXX: x-resolution divided by 4 */
 	par->ibmap0 = 0x02681002;
 	par->bmap_z = 0x13090006;
-	par->obmap0 = 0x23aa0000;
-	par->ibmap1 = 0x27e00002;
+	par->obmap0 = 0x23a80380;
+	par->ibmap1 = 0x27e00002; // 0x27d00e02
 
 	visfx_setup_and_wait(info, B2_ABMAP, par->abmap);
 	visfx_setup_and_wait(info, B2_IBMAP0, par->ibmap0);
 	visfx_setup_and_wait(info, B2_BMAP_Z, par->bmap_z);
 	visfx_setup_and_wait(info, B2_OBMAP0, par->obmap0);
-	visfx_setup_and_wait(info, UP_CF_STATE, 0x00000000);
+	visfx_setup_and_wait(info, UP_CF_STATE, 0);
 	visfx_setup_and_wait(info, B2_IBMAP1, par->ibmap1);
 	visfx_setup_and_wait(info, B2_DUM, 0x81030002);
 	// visfx_setup_and_wait(info, B2_DUM, 0); // keine Auswirkung?
@@ -862,6 +856,7 @@ static void visfx_setup(struct fb_info *info)
 	visfx_writel(info, B2_OTLS, 2);
 	visfx_writel(info, B2_OBS, 0);
 
+	visfx_wclip(info, 0, 0, var->xres, var->yres);
 	visfx_clear_buffer(info, 0x05000880, par->ibmap0, 0x03f00000, 0);
 	visfx_clear_buffer(info, 0x05000880, par->obmap0, 0x00fc0000, 0);
 	visfx_clear_buffer(info, 0x05000880, par->abmap,  0x00900000, 0);
@@ -877,10 +872,9 @@ static void visfx_setup(struct fb_info *info)
 		visfx_writel(info, B2_LUTD, 0x010101 * i);
 	}
 
-	visfx_setup_x11_pattern(info);
+	if (0) visfx_setup_x11_pattern(info);
 
 	visfx_clear_buffer(info, 0x00000a00, par->ibmap0, 0x03f00000, 0);
-	visfx_wclip(info, 0, 0, var->xres, var->yres);
 	visfx_clear_buffer(info, 0x05000880, par->obmap0, 0x00fc0000, 0xffffffff);
 	visfx_buffer_setup(info, 2, 0x08000084, 0, 0);  // XXX vertauscht !!   8000084 für Overlay
 	// visfx_buffer_setup(info, 2, 0, 0x08000084, 0);  // XXX vertauscht !!   8000084 für Overlay
@@ -951,7 +945,6 @@ static void visfx_setup(struct fb_info *info)
 		visfx_writel(info, B2_EN2D, B2_EN2D_BYTE_MODE);
 		visfx_writel(info, B2_SBA, B2_DBA_BIN8I | B2_DBA_OTC04);
 		par->dba = B2_DBA_BIN8I | B2_DBA_OTC04 | B2_DBA_DIRECT | B2_DBA_D;  // doch OCT01 ???
-		// visfx_writel(info, B2_BABoth, par->dba);
 		visfx_writel(info, B2_BPM, 0xffffffff);
 		visfx_writel(info, B2_OTR, 1<<16 | 3); // ???  Seite 382, 3=immer undurchsichtig !!
 		// IAA0 -> Seite 383 -> 
@@ -1202,7 +1195,7 @@ static int __init visfx_probe_i2c_connector(struct fb_info *info, u8 **out_edid)
 	u8 *edid;
 
 	edid = fb_ddc_read(&par->adapter);
-printk("edid1 %px    %*ph\n", edid, 20, edid);
+// printk("edid1 %px    %*ph\n", edid, 20, edid);
 
 	*out_edid = edid;
 
@@ -1223,7 +1216,6 @@ static void __init visfx_find_init_mode(struct fb_info *info)
 
 	visfx_create_i2c_busses(par);
 
-printk("aaaaaaaa\n");
 	if (!visfx_probe_i2c_connector(info, &par->edid))
 		printk("visfxfb_init_pci: DDC probe successful\n");
 printk("bbbbbbb  par->edid = %px\n", par->edid);
