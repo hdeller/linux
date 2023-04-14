@@ -248,7 +248,7 @@ static void visfx_imageblit(struct fb_info *info, const struct fb_image *image)
 	case 8:
 		visfx_writel(info, B2_DBA, B2_DBA_OTC01 | B2_DBA_DIRECT);
 		visfx_writel(info, B2_BPM, 0xffffffff);
-		visfx_wclip(info, 0, 0, info->var.xres, info->var.yres);
+		// visfx_wclip(info, 0, 0, info->var.xres, info->var.yres);
 
 		for (y = 0; y < image->height; y++) {
 			visfx_set_vram_addr(info, image->dx, image->dy + y);
@@ -289,17 +289,18 @@ static int visfx_setcmap(struct fb_cmap *cmap, struct fb_info *info)
 	if (info->fix.visual != FB_VISUAL_PSEUDOCOLOR)
 		return -EINVAL;
 
-//  printk("visfx_setcmap start %d  len = %d\n", cmap->start, cmap->len);
+// printk("visfx_setcmap start %d  len = %d\n", cmap->start, cmap->len);
 	visfx_writel(info, B2_LLCA, cmap->start);
 
 	for (i = 0; i < cmap->len; i++) {
 		u32 rgb = visfx_cmap_entry(cmap, i);
 
 		visfx_writel(info, B2_LUTD, rgb);
-		((u32*)info->pseudo_palette)[cmap->start + i] = rgb;
+		if (cmap->start + i < NR_PALETTE)
+			((u32*)info->pseudo_palette)[cmap->start + i] = rgb;
 	}
 
-	visfx_writel(info, B2_PMASK, 0xffffffff);
+	// visfx_writel(info, B2_PMASK, 0xffffffff);
 	visfx_writel(info, B2_CP, 0);
 
 	return 0;
@@ -760,7 +761,7 @@ static void visfx_setup(struct fb_info *info)
 
 #ifdef __BIG_ENDIAN
 	// SEite 238
-	if (var->bits_per_pixel == 32) {
+	if (1 || var->bits_per_pixel == 32) {
 		visfx_writel(info, B2_DMA_BSCFB, DSM_NO_BYTE_SWAP);
 		visfx_writel(info, B2_PDU_BSCFB, DSM_NO_BYTE_SWAP);
 	} else {
@@ -811,7 +812,7 @@ static void visfx_setup(struct fb_info *info)
 	par->abmap  = var->xres / 4;	/* XXX: x-resolution divided by 4 */
 	par->ibmap0 = 0x02681002;
 	par->bmap_z = 0x13090006;
-	par->obmap0 = 0x23a80380;
+	par->obmap0 = 0x23a80000 | var->xres / 2;
 	par->ibmap1 = 0x27e00002; // 0x27d00e02
 
 	visfx_setup_and_wait(info, B2_ABMAP, par->abmap);
@@ -830,9 +831,9 @@ static void visfx_setup(struct fb_info *info)
 	for (i = 0; i < 7; i++)
 		visfx_buffer_setup(info, i, 0, 0, 0);
 
-	visfx_buffer_setup(info, 0, 0x09000004, 0, 0); // 0x2000000 bei nicht true/directcolor
+	visfx_buffer_setup(info, 0, (var->bits_per_pixel == 32) ? 0x09000004 : 0x2000000, 0, 0);
 	visfx_buffer_setup(info, 1, 0x09000004, 1, 0);
-	visfx_setup_and_wait(info, B2_OMC, (1 << 25));
+	visfx_setup_and_wait(info, B2_OMC, 0x2000000);
 	visfx_writel(info, B2_OTLS, 2);
 	visfx_writel(info, B2_OBS, 0);
 
@@ -897,19 +898,22 @@ static void visfx_setup(struct fb_info *info)
 	if (info->var.bits_per_pixel == 32) {
 		visfx_writel(info, B2_EN2D, B2_EN2D_WORD_MODE);
 		par->dba = B2_DBA_BIN8F | B2_DBA_OTC01 | B2_DBA_DIRECT | B2_DBA_D;
-		visfx_writel(info, B2_SBA, B2_DBA_BIN8F | B2_DBA_OTC01);
+		// visfx_writel(info, B2_SBA, B2_DBA_BIN8F | B2_DBA_OTC01);
 		par->bmap_dba = par->ibmap0;
-		visfx_writel(info, B2_OTR, 1<<8 | 0); // ???  Seite 382, Overlay immer durchsichtig !!
+		visfx_writel(info, B2_OTR, 1<<16 | 1<<8 | 0); // ???  Seite 382, Overlay immer durchsichtig !!
 		visfx_writel(info, B2_FATTR, 0);
 	} else { /* 8-bit indexed: */
 		visfx_writel(info, B2_EN2D, B2_EN2D_BYTE_MODE);
-		visfx_writel(info, B2_SBA, B2_DBA_BIN8I | B2_DBA_OTC04);
+		// visfx_writel(info, B2_SBA, B2_DBA_BIN8I | B2_DBA_OTC04);
 		par->dba = B2_DBA_BIN8I | B2_DBA_OTC04 | B2_DBA_DIRECT | B2_DBA_D;  // doch OCT01 ???
 		visfx_writel(info, B2_BPM, 0xffffffff);
-		visfx_writel(info, B2_OTR, 1<<16 | 3); // ???  Seite 382, 3=immer undurchsichtig !!
+		// visfx_writel(info, B2_OTR, 1<<16 | 3); // ???  Seite 382, 3=immer undurchsichtig !!
+		visfx_writel(info, B2_OTR, 2 ); // ???  Seite 382, 3=immer undurchsichtig !!
 		// IAA0 -> Seite 383 -> 
-		// visfx_writel(info, B2_CFS16, 0x40); // mode=4, LUT=3 LUT auswählen
-		visfx_writel(info, B2_CFS16, 0x0); // mode=4, LUT=3 LUT auswählen
+		visfx_writel(info, B2_CFS16, 0x40); // mode=4, LUT=3 LUT auswählen
+		// visfx_writel(info, B2_CFS16, 0x0); // mode=4, LUT=3 LUT auswählen // Seite 396
+		// visfx_writel(info, B2_FATTR, 1<<7 | 1<<4); // -> CFS16  -> force Overlay!
+		// visfx_writel(info, B2_FATTR, 0);
 		visfx_writel(info, B2_FATTR, 1<<7 | 1<<4); // -> CFS16  -> force Overlay!
 		par->bmap_dba = par->obmap0;
 	}
