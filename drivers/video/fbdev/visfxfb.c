@@ -742,6 +742,8 @@ static void visfx_setup_and_wait(struct fb_info *info, u32 reg, u32 val)
 
 static void visfx_clear_buffer(struct fb_info *info, u32 dba, u32 bmap_dba, u32 mbwb, u32 ifc)
 {
+	struct fb_var_screeninfo *var = &info->var;
+
 	visfx_writel(info, B2_DBA, dba);
 	visfx_writel(info, B2_BMAP_DBA, bmap_dba);
 	visfx_writel(info, B2_IBO, 0);
@@ -752,12 +754,8 @@ static void visfx_clear_buffer(struct fb_info *info, u32 dba, u32 bmap_dba, u32 
 	visfx_writel(info, B2_WCE, 0);
 	visfx_writel(info, B2_CPE, 0);
 	visfx_writel(info, B2_MBWB, mbwb);
-	visfx_writel(info, B2_DBA, dba | 0x1000);
 	visfx_writel(info, B2_MNOOP_R0R1, 0);
-	visfx_writel(info, B2_SOLIDFILL_R2R3_REMAP, 1920<<16 | 576); // 0x06400240);
-	visfx_writel(info, B2_DBA, 0x05000880);
-	visfx_writel(info, B2_MNOOP_R0R1, 1152); // 0x480);
-	visfx_writel(info, B2_SOLIDFILL_R2R3_REMAP, 1920<<16 | 48); //0x06400030);
+	visfx_writel(info, B2_SOLIDFILL_R2R3_REMAP, var->xres<<16 | var->yres); // 0x06400240);
 }
 
 static void visfx_setup_x11_pattern(struct fb_info *info)
@@ -876,27 +874,9 @@ static void visfx_setup(struct fb_info *info)
 
 	visfx_clear_buffer(info, 0x00000a00, par->ibmap0, 0x03f00000, 0);
 	visfx_clear_buffer(info, 0x05000880, par->obmap0, 0x00fc0000, 0xffffffff);
-	visfx_buffer_setup(info, 2, 0x08000084, 0, 0);  // XXX vertauscht !!   8000084 für Overlay
-	// visfx_buffer_setup(info, 2, 0, 0x08000084, 0);  // XXX vertauscht !!   8000084 für Overlay
+	visfx_buffer_setup(info, 2, 0x08000084, 0, 0);  // 8000084 für Overlay
 
-#if 1
-	visfx_writel(info, B2_WCE, 0);
-	visfx_writel(info, B2_SOV, 0);
-	visfx_writel(info, B2_DBA, 0x05000880);
-	visfx_writel(info, B2_BMAP_DBA, par->abmap);
-
-	visfx_writel(info, B2_IFC, 0x00000000);
-	visfx_writel(info, B2_IPM, 0xffffffff);
-
-	visfx_writel(info, B2_MBWB, 0x00900000);
-	visfx_writel(info, B2_DBA, 0x05001880);
-	visfx_writel(info, B2_MNOOP_R0R1, 0);
-	visfx_writel(info, B2_SOLIDFILL_R2R3_REMAP, 800<<16 | 576); // 0x03200240);
-	visfx_writel(info, B2_DBA, 0x05000880);
-	visfx_writel(info, B2_MNOOP_R0R1, 0x480);
-	visfx_writel(info, B2_SOLIDFILL_R2R3_REMAP, 800<<16 | 48); // 0x03200030);
 	visfx_wait_write_pipe_empty(info);
-#endif
 	visfx_writel(info, B2_BMAP_DBA, par->ibmap0);
 
 	info->fix.accel = FB_ACCEL_NONE;
