@@ -407,10 +407,7 @@ static int visfx_init_pll(struct fb_info *info, u32 reg, u32 value1, u32 value2)
 {
 	int ret;
 
-	if (reg == B2_PLL_DOT_CTL)
-		visfx_writel_dump(info, reg, value1, 0x527b0c);
-	else
-		visfx_writel(info, reg, value1);
+	visfx_writel(info, reg, value1);
 	ret = visfx_wait_pll(info);
 	if (ret)
 		return ret;
@@ -447,10 +444,6 @@ static int visfx_set_par(struct fb_info *info)
 	vsw = var->vsync_len - 1;
 	vfp = var->lower_margin - 1;
 	vbp = var->upper_margin - 1;
-// printk("hsync_len  %d\n", var->hsync_len);
-// printk("vsync_len  %d\n", var->vsync_len);
-// printk("left_margi   %d   %d  \n", var->left_margin, var->right_margin);
-// printk("up/low_margi   %d   %d  \n", var->upper_margin, var->lower_margin);
 // printk("visfx_set_par %dx%d-%d\n", xres, yres, var->bits_per_pixel);
 
 	ret = visfx_set_pll(info, B2_PLL_DOT_CTL, var->pixclock); // 00527b0c
@@ -498,6 +491,8 @@ static int visfx_check_var(struct fb_var_screeninfo *var, struct fb_info *info)
 	if (var->bits_per_pixel != 8 && var->bits_per_pixel != 32)
 		return -EINVAL;
 
+	if (var->xres & 0x7)
+		return -EINVAL;
 	if (var->xres < MIN_XRES)
 		var->xres = MIN_XRES;
 	if (var->yres < MIN_YRES)
@@ -711,15 +706,12 @@ int visfx_set_default_mode(struct fb_info *info)
 	tmp = (visfx_readl(info, 0x50024) & 0xffff0000) |
 		(visfx_readl(info, 0x50020) & 0xffff);
 
-
 	visfx_writel(info, B2_VHAL, tmp - 0x10001);
 
 	visfx_writel(info, B2_ETG, visfx_readl(info, 0x50044));
 	visfx_writel(info, B2_SCR, visfx_readl(info, 0x5004c));
 	tmp = visfx_readl(info, 0x50054);
-//	visfx_writel(info, B2_IBMAP0, (tmp = 0x20003c0)); // tmp);
 	visfx_writel(info, B2_IMD, 2);
-//	visfx_writel(info, B2_BMAP_BABoth, tmp);
 	return 0;
 }
 
@@ -756,16 +748,6 @@ static void visfx_clear_buffer(struct fb_info *info, u32 dba, u32 bmap_dba, u32 
 	visfx_writel(info, B2_MBWB, mbwb);
 	visfx_writel(info, B2_MNOOP_R0R1, 0);
 	visfx_writel(info, B2_SOLIDFILL_R2R3_REMAP, var->xres<<16 | var->yres); // 0x06400240);
-}
-
-static void visfx_setup_x11_pattern(struct fb_info *info)
-{
-	int i;
-
-	visfx_writel(info, B2_IPM, 0xffffffff);
-	for (i = 0; i < 256; i += 4)
-		visfx_writel(info, B2_PDR0 + i, 0);
-	visfx_writel(info, B2_PCR, 0xc034);
 }
 
 static void visfx_setup(struct fb_info *info)
@@ -869,8 +851,6 @@ static void visfx_setup(struct fb_info *info)
 		visfx_writel(info, B2_LLCA, 0x40003000 | i);
 		visfx_writel(info, B2_LUTD, 0x010101 * i);
 	}
-
-	if (0) visfx_setup_x11_pattern(info);
 
 	visfx_clear_buffer(info, 0x00000a00, par->ibmap0, 0x03f00000, 0);
 	visfx_clear_buffer(info, 0x05000880, par->obmap0, 0x00fc0000, 0xffffffff);
@@ -996,7 +976,6 @@ static int __init visfx_initialize(struct fb_info *info)
 	visfx_writel(info, B2_FOE, 0);
 	visfx_writel(info, B2_IBO, 0);
 	visfx_writel(info, B2_FCDA, 0);
-	visfx_writel(info, B2_WCE, 0);
 	visfx_writel(info, B2_CPE, 0);
 	visfx_writel(info, B2_IPM, 0xffffffff);
 
@@ -1022,10 +1001,6 @@ static int __init visfx_initialize(struct fb_info *info)
 	visfx_writel(info, B2_FBC_RBS, 0xe4);
 	visfx_writel(info, B2_FOE, 0);
 
-	visfx_writel(info, B2_FCDA, 0);
-	visfx_writel(info, B2_WCE, 0);
-	visfx_writel(info, B2_CPE, 0);
-	visfx_writel(info, B2_WCLIP1UL, 0);
 	visfx_writel(info, B2_EN2D, B2_EN2D_BYTE_MODE);
 
 	return 0;
