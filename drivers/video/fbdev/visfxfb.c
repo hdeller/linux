@@ -216,6 +216,9 @@ static void visfx_imageblit_mono(struct fb_info *info, const char *data, int dx,
 {
 	int _width, x;
 
+	// B2_DBA_BIN8F | B2_DBA_OTC01 | B2_DBA_DIRECT | B2_DBA_D;  -> B2_DBA_OTC(5) | B2_DBA_S | B2_DBA_IND_BG_FG);
+	// B2_DBA_BIN8I | B2_DBA_OTC04 | B2_DBA_DIRECT | B2_DBA_D;
+	// visfx_writel(info, B2_DBA, par->dba | B2_DBA_S | B2_DBA_IND_BG_FG);
 	visfx_writel(info, B2_DBA, B2_DBA_OTC(5) | B2_DBA_S | B2_DBA_IND_BG_FG);
 	visfx_set_bmove_color(info, fg_color, bg_color);
 	visfx_writel(info, B2_BPM, 0xffffffff);
@@ -236,6 +239,9 @@ static void visfx_imageblit(struct fb_info *info, const struct fb_image *image)
 {
 	struct visfx_par *par = info->par;
 	int x, y;
+
+	if (info->var.bits_per_pixel == 8)
+		return cfb_imageblit(info, image);
 
 	visfx_wait_write_pipe_empty(info);
 
@@ -916,15 +922,10 @@ static void visfx_setup(struct fb_info *info)
 		visfx_writel(info, B2_FATTR, 1<<7 | 1<<4); // -> CFS16  -> force Overlay!
 		par->bmap_dba = par->obmap0;
 	}
-// con2fbmap
+// con2fbmap 1 1
+// fbset  -fb /dev/fb1 1280x1024-60 -depth 8
 
-// printk("BMAP_DBA   = %08x\n", par->dba);
-// printk("BMAP_IBMAP = %08x\n", par->ibmap);
-//	visfx_writel(info, B2_IBMAP0, par->ibmap);
-//	visfx_writel(info, B2_IMD, 2);
 	visfx_writel(info, B2_BMAP_BABoth, par->bmap_dba);  // WOW !!!!!
-
-	// visfx_writel(info, B2_DBA, par->dba);
 	visfx_writel(info, B2_BABoth, par->dba);
 	visfx_writel(info, B2_IPM, 0xffffffff); /* all bits/planes relevant, incl. A-mask */
 }
