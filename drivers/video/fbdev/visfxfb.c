@@ -821,8 +821,7 @@ static void visfx_setup(struct fb_info *info)
 	visfx_setup_and_wait(info, B2_OBMAP0, par->obmap0);
 	visfx_setup_and_wait(info, UP_CF_STATE, 0);
 	visfx_setup_and_wait(info, B2_IBMAP1, par->ibmap1);
-	visfx_setup_and_wait(info, B2_DUM, 0x81030002);
-	// visfx_setup_and_wait(info, B2_DUM, 0); // keine Auswirkung?
+	visfx_setup_and_wait(info, B2_DUM, 0x81030002); // keine Auswirkung?
 	visfx_setup_and_wait(info, B2_OXYO, 0);
 
 	visfx_writel(info, B2_PMASK, 0xff);
@@ -832,7 +831,7 @@ static void visfx_setup(struct fb_info *info)
 		visfx_buffer_setup(info, i, 0, 0, 0);
 
 	visfx_buffer_setup(info, 0, (var->bits_per_pixel == 32) ? 0x09000004 : 0x2000000, 0, 0);
-	visfx_buffer_setup(info, 1, 0x09000004, 1, 0);
+	visfx_buffer_setup(info, 1, (var->bits_per_pixel == 32) ? 0x09000004 : 0x2000000, 1, 0);
 	visfx_setup_and_wait(info, B2_OMC, 0x2000000);
 	visfx_writel(info, B2_OTLS, 2);
 	visfx_writel(info, B2_OBS, 0);
@@ -844,7 +843,7 @@ static void visfx_setup(struct fb_info *info)
 
 	visfx_writel(info, B2_PMASK, 0xff);
 	visfx_writel(info, B2_FATTR, 0);
-	visfx_writel(info, B2_OTLS, 0x10002);
+	visfx_writel(info, B2_OTLS, (var->bits_per_pixel == 8) ? 0 : 0x10002);  // OTLS_Type -> auf 0 ?? statt OTR oder 1
 	visfx_writel(info, B2_CKEY_HI, 0xffffff);
 	visfx_writel(info, B2_CKEY_LO, 0xffffff);
 
