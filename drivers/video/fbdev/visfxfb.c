@@ -3,7 +3,7 @@
  * Framebuffer driver for Visualize FX cards commonly found in PA-RISC machines
  *
  * Copyright (c) 2021-2023 Sven Schnelle <svens@stackframe.org>
- * Copyright (c)      2022 Helge Deller <deller@gmx.de>
+ * Copyright (c) 2022-2023 Helge Deller <deller@gmx.de>
  *
  *
  * insmod ~/visfxfb.ko mode_option=1366x768
@@ -293,6 +293,11 @@ static int visfx_setcolreg(unsigned regno, unsigned red, unsigned green,
 {
 	u32 r, g, b;
 
+	if (info->var.grayscale) {
+		/* grayscale = 0.30*R + 0.59*G + 0.11*B */
+		red = green = blue = (red * 77 + green * 151 + blue * 28) >> 8;
+	}
+
 	switch (info->fix.visual) {
 	case FB_VISUAL_PSEUDOCOLOR:
 		if (regno >= 256)
@@ -301,6 +306,7 @@ static int visfx_setcolreg(unsigned regno, unsigned red, unsigned green,
 		g = (green >> 8) << 8;
 		b = (blue >> 8);
 		// if (regno < 2 || regno == 255) printk("visfx_setcolreg(%d) = %08x\n", regno, r | g | b);
+		set_clut:
 		visfx_writel(info, B2_LLCA, regno);
 		visfx_writel(info, B2_LUTD, r | g | b);
 		break;
@@ -314,10 +320,8 @@ static int visfx_setcolreg(unsigned regno, unsigned red, unsigned green,
 			<< info->var.green.offset;
 		if (regno < 16)
 			((u32 *) info->pseudo_palette)[regno] = r | g | b;
-		if (info->fix.visual == FB_VISUAL_DIRECTCOLOR) {
-			visfx_writel(info, B2_LLCA, regno);
-			visfx_writel(info, B2_LUTD, r | g | b);
-		}
+		if (info->fix.visual == FB_VISUAL_DIRECTCOLOR)
+			goto set_clut;
 		break;
 	default:
 		return -EINVAL;
@@ -908,7 +912,6 @@ static void visfx_setup(struct fb_info *info)
 		var->transp.offset = 0;
 	}
 
-	var->grayscale = 0;
 	var->xres_virtual = var->xres;
 	var->yres_virtual = var->yres;
 	visfx_wclip(info, 0, 0, var->xres, var->yres);
@@ -1298,6 +1301,11 @@ static int __init visfx_init_device(struct pci_dev *pdev, struct sti_struct *sti
 
 	info->var.bits_per_pixel = DEFAULT_BPP;
 
+	ret = fb_alloc_cmap(&info->cmap, 256, 0);
+	if (ret)
+		goto err_out_free;
+
+
 printk("MODE OPTION %s\n", mode_option);
 	visfx_setup(info);
 	visfx_find_init_mode(info);
@@ -1311,10 +1319,6 @@ printk("MODE OPTION %s\n", mode_option);
 
 	visfx_get_video_mode(info);
 	info->var.accel_flags = info->flags;
-
-	ret = fb_alloc_cmap(&info->cmap, 256, 0);
-	if (ret)
-		goto err_out_free;
 
 	ret = register_framebuffer(info);
 	if (ret)
