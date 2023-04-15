@@ -238,7 +238,7 @@ static void visfx_imageblit(struct fb_info *info, const struct fb_image *image)
 	struct visfx_par *par = info->par;
 	int x, y;
 
-	if (info->var.bits_per_pixel == 8)
+	if (info->fix.visual == FB_VISUAL_PSEUDOCOLOR)
 		return cfb_imageblit(info, image);
 
 	visfx_wait_write_pipe_empty(info);
@@ -300,6 +300,7 @@ static int visfx_setcolreg(unsigned regno, unsigned red, unsigned green,
 		r = (red >> 8) << 16;
 		g = (green >> 8) << 8;
 		b = (blue >> 8);
+		// if (regno < 2 || regno == 255) printk("visfx_setcolreg(%d) = %08x\n", regno, r | g | b);
 		visfx_writel(info, B2_LLCA, regno);
 		visfx_writel(info, B2_LUTD, r | g | b);
 		break;
@@ -1376,10 +1377,10 @@ static void visfx_probe_sti(struct sti_struct *sti, int enable)
 
 		info = pci_get_drvdata(sti->pd);
 		par = info->par;
-		pci_iounmap(sti->pd, par->reg_base);
-		fb_dealloc_cmap(&info->cmap);
 		unregister_framebuffer(info);
+		fb_dealloc_cmap(&info->cmap);
 		framebuffer_release(info);
+		pci_iounmap(sti->pd, par->reg_base);
 		if (SYSFS) device_remove_file(info->dev, &dev_attr_visfx_sysfs);
 	}
 }
