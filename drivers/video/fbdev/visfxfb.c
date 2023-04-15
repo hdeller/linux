@@ -45,8 +45,6 @@
 #define MIN_XRES	640
 #define MIN_YRES	480
 
-#define NR_PALETTE	256
-
 #define DEFAULT_BPP	32
 
 #define SYSFS		0
@@ -74,7 +72,7 @@ struct visfx_par {
 	unsigned long reg_size;
 	u32 abmap, ibmap0, bmap_z, ibmap1, obmap0;
 	u32 dba, bmap_dba;
-	u32 pseudo_palette[NR_PALETTE];
+	u32 pseudo_palette[16];
 	struct visfx_default *defaults;
 	struct device *dev;
 	int open_count;
@@ -288,26 +286,41 @@ static void visfx_fillrect(struct fb_info *info, const struct fb_fillrect *fr)
 	visfx_writel(info, B2_DBA, par->dba);
 }
 
-static int visfx_setcmap(struct fb_cmap *cmap, struct fb_info *info)
+
+static int visfx_setcolreg(unsigned regno, unsigned red, unsigned green,
+                             unsigned blue, unsigned transp,
+			     struct fb_info *info)
 {
-	unsigned int i;
+	u32 r, g, b;
 
-	if (info->fix.visual != FB_VISUAL_PSEUDOCOLOR)
+	switch (info->fix.visual) {
+	case FB_VISUAL_PSEUDOCOLOR:
+		if (regno >= 256)
+			return -EINVAL;
+		r = (red >> 8) << 16;
+		g = (green >> 8) << 8;
+		b = (blue >> 8);
+		visfx_writel(info, B2_LLCA, regno);
+		visfx_writel(info, B2_LUTD, r | g | b);
+		break;
+	case FB_VISUAL_TRUECOLOR:
+	case FB_VISUAL_DIRECTCOLOR:
+		r = (red >> (16 - info->var.red.length))
+			<< info->var.red.offset;
+		b = (blue >> (16 - info->var.blue.length))
+			<< info->var.blue.offset;
+		g = (green >> (16 - info->var.green.length))
+			<< info->var.green.offset;
+		if (regno < 16)
+			((u32 *) info->pseudo_palette)[regno] = r | g | b;
+		if (info->fix.visual == FB_VISUAL_DIRECTCOLOR) {
+			visfx_writel(info, B2_LLCA, regno);
+			visfx_writel(info, B2_LUTD, r | g | b);
+		}
+		break;
+	default:
 		return -EINVAL;
-
-// printk("visfx_setcmap start %d  len = %d\n", cmap->start, cmap->len);
-	visfx_writel(info, B2_LLCA, cmap->start);
-
-	for (i = 0; i < cmap->len; i++) {
-		u32 rgb = visfx_cmap_entry(cmap, i);
-
-		visfx_writel(info, B2_LUTD, rgb);
-		if (cmap->start + i < NR_PALETTE)
-			((u32*)info->pseudo_palette)[cmap->start + i] = rgb;
 	}
-
-	// visfx_writel(info, B2_PMASK, 0xffffffff);
-	visfx_writel(info, B2_CP, 0);
 
 	return 0;
 }
@@ -586,7 +599,7 @@ static int visfx_cursor(struct fb_info *info, struct fb_cursor *cursor)
 
 static const struct fb_ops visfx_ops = {
 	.owner		= THIS_MODULE,
-	.fb_setcmap	= visfx_setcmap,
+	.fb_setcolreg	= visfx_setcolreg,
 	.fb_fillrect	= visfx_fillrect,
         // .fb_copyarea    = stifb_copyarea,
 	.fb_imageblit	= visfx_imageblit,
@@ -1298,7 +1311,7 @@ printk("MODE OPTION %s\n", mode_option);
 	visfx_get_video_mode(info);
 	info->var.accel_flags = info->flags;
 
-	ret = fb_alloc_cmap(&info->cmap, NR_PALETTE, 0);
+	ret = fb_alloc_cmap(&info->cmap, 256, 0);
 	if (ret)
 		goto err_out_free;
 
