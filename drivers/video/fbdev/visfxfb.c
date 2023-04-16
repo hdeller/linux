@@ -741,7 +741,9 @@ static void visfx_setup(struct fb_info *info)
 	} else {
 		// 0 am Besten, zeigt aber 4 gleiche Pixel nebeneinander (wegen OTC04, aber OTC01 ist falsch bei 32bit zugriff)
 		// Seite 222
-		u32 val = 0x0; // 0x66666666; oder e4
+		// DSM_NO_BYTE_SWAP (e4) -> console ist OK, aber pinguin farben falsch
+		// 0 -> console kaputt, aber pinguin richtig.
+		u32 val = DSM_NO_BYTE_SWAP;  // XXX
 		visfx_writel(info, B2_DMA_BSCFB, val);
 		visfx_writel(info, B2_PDU_BSCFB, val);
 		visfx_writel(info, B2_FBC_RBS, DSM_NO_BYTE_SWAP);
