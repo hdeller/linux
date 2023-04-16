@@ -564,8 +564,10 @@ config FB_STI
 config FB_VISUALIZEFX
 	tristate "HP Visualize FX support"
 	depends on FB && PCI && PARISC
-	select FB_DDC
 	select RATIONAL
+	select FB_CFB_FILLRECT
+	select FB_CFB_COPYAREA
+	select FB_CFB_IMAGEBLIT
 	  help
 	    Frame buffer driver for the HP Visualize FX cards. These cards are
 	    commonly found in PA-RISC workstations. Currently only FX5 has been
