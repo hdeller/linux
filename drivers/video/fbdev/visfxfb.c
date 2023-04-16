@@ -47,8 +47,6 @@
 
 #define DEFAULT_BPP	32
 
-#define SYSFS		0
-
 static char *mode_option; /* empty means take video mode from ROM */
 
 struct visfx_default {
@@ -75,8 +73,6 @@ struct visfx_par {
 	u32 pseudo_palette[16];
 	struct visfx_default *defaults;
 	struct device *dev;
-	int open_count;
-	unsigned long debug_reg;
 
 	struct fb_info *info;
 	struct i2c_adapter adapter;
@@ -105,47 +101,6 @@ static void visfx_writel_dump(struct fb_info *info, int reg, u32 val, u32 refere
 	// printk("DUMP  reg %08x <- %08x,   reference %08x\n", reg, val, reference);
 	return visfx_writel(info, reg, val);
 }
-
-static ssize_t visfx_sysfs_show(struct device *dev,
-				    struct device_attribute *attr,
-				    char *buf)
-{
-	struct fb_info *info = pci_get_drvdata(to_pci_dev(dev));
-	struct visfx_par *par = info->par;
-
-	return sprintf(buf, "%08x\n", visfx_readl(info, par->debug_reg));
-}
-
-static ssize_t visfx_sysfs_store(struct device *dev,
-				     struct device_attribute *attr,
-				     const char *buf, size_t count)
-{
-	struct fb_info *info = pci_get_drvdata(to_pci_dev(dev));
-	struct visfx_par *par = info->par;
-	unsigned long data;
-	char *p;
-
-	p = strchr(buf, '=');
-	if (p)
-		*p = '\0';
-
-	if (kstrtoul(buf, 16, &par->debug_reg))
-		return -EINVAL;
-
-	if (par->debug_reg >= VISFX_FB_LENGTH)
-		return -EINVAL;
-
-	if (p) {
-		if (kstrtoul(p+1, 16, &data))
-			return -EINVAL;
-		visfx_writel(info, par->debug_reg, data);
-	}
-	return count;
-}
-
-// static DEVICE_ATTR(reg, 0600, visfx_sysfs_show_reg, visfx_sysfs_store_reg);
-static DEVICE_ATTR_ADMIN_RW(visfx_sysfs);
-
 
 static void visfx_write_vram(struct fb_info *info, int reg, u32 val)
 {
@@ -785,22 +740,24 @@ static void visfx_setup(struct fb_info *info)
 
 #ifdef __BIG_ENDIAN
 	// SEite 238
-	if (1 || var->bits_per_pixel == 32) {
+	if (var->bits_per_pixel == 32) {
 		visfx_writel(info, B2_DMA_BSCFB, DSM_NO_BYTE_SWAP);
 		visfx_writel(info, B2_PDU_BSCFB, DSM_NO_BYTE_SWAP);
 	} else {
-		visfx_writel(info, B2_DMA_BSCFB, DSM_PDU_BYTE_SWAP_DEFAULT);
-		visfx_writel(info, B2_PDU_BSCFB, DSM_PDU_BYTE_SWAP_DEFAULT);
+		// 0 am Besten, zeigt aber 4 gleiche Pixel nebeneinander (wegen OTC04, aber OTC01 ist falsch bei 32bit zugriff)
+		// Seite 222
+		u32 val = 0x0; // 0x66666666; oder e4
+		visfx_writel(info, B2_DMA_BSCFB, val);
+		visfx_writel(info, B2_PDU_BSCFB, val);
+		visfx_writel(info, B2_FBC_RBS, DSM_NO_BYTE_SWAP);
 	}
 	visfx_writel(info, B2_MFU_BSCTD, DSM_NO_BYTE_SWAP);
 	visfx_writel(info, B2_MFU_BSCCTL, DSM_PDU_BYTE_SWAP_DEFAULT);
 #if 0
-#define DSM_NO_BYTE_SWAP                        0xe4e4e4e4
+#define DSM_NO_BYTE_SWAP                        0xe4e4e4e4  // Seite 238
 #define DSM_RGBA_TO_ARGB_BYTE_SWAP              0x39393939
 #define DSM_ARGB_TO_RGBA_BYTE_SWAP              0x93939393
 #define DSM_PDU_BYTE_SWAP_DEFAULT               0x1b1b1b1b
-#define DSM_DMA_BYTE_SWAP_DEFAULT               0x1b1b1b1b
-#define DSM_MFU_BYTE_SWAP_DEFAULT               0x1b1b1b1b
 #define DSM_HOST_IS_LITTLE_ENDIAN               0x01010101
 #define DSM_HOST_IS_BIG_ENDIAN                  0x00000000
 #endif
@@ -920,24 +877,22 @@ static void visfx_setup(struct fb_info *info)
 	if (info->var.bits_per_pixel == 32) {
 		visfx_writel(info, B2_EN2D, B2_EN2D_WORD_MODE);
 		par->dba = B2_DBA_BIN8F | B2_DBA_OTC01 | B2_DBA_DIRECT | B2_DBA_D;
-		// visfx_writel(info, B2_SBA, B2_DBA_BIN8F | B2_DBA_OTC01);
 		par->bmap_dba = par->ibmap0;
+		visfx_writel(info, B2_BPM, 0xffffffff);
 		visfx_writel(info, B2_OTR, 1<<16 | 1<<8 | 0); // ???  Seite 382, Overlay immer durchsichtig !!
 		visfx_writel(info, B2_FATTR, 0);
 	} else { /* 8-bit indexed: */
 		visfx_writel(info, B2_EN2D, B2_EN2D_BYTE_MODE);
-		// visfx_writel(info, B2_SBA, B2_DBA_BIN8I | B2_DBA_OTC04);
-		par->dba = B2_DBA_BIN8I | B2_DBA_OTC04 | B2_DBA_DIRECT | B2_DBA_D;  // doch OCT01 ???
-		visfx_writel(info, B2_BPM, 0xffffffff);
+		par->dba = B2_DBA_BIN8I | B2_DBA_OTC04 | B2_DBA_DIRECT | B2_DBA_D;  // doch OCT01 oder OTC04 ???
+		par->bmap_dba = par->obmap0;
+		visfx_writel(info, B2_BPM, 0xff << 24);  // oder 0xff << 24
 		// visfx_writel(info, B2_OTR, 1<<16 | 3); // ???  Seite 382, 3=immer undurchsichtig !!
 		visfx_writel(info, B2_OTR, 2 ); // ???  Seite 382, 3=immer undurchsichtig !!
-		// IAA0 -> Seite 383 -> 
 		visfx_writel(info, B2_CFS16, 0x40); // mode=4, LUT=3 LUT auswählen
 		// visfx_writel(info, B2_CFS16, 0x0); // mode=4, LUT=3 LUT auswählen // Seite 396
 		// visfx_writel(info, B2_FATTR, 1<<7 | 1<<4); // -> CFS16  -> force Overlay!
 		// visfx_writel(info, B2_FATTR, 0);
 		visfx_writel(info, B2_FATTR, 1<<7 | 1<<4); // -> CFS16  -> force Overlay!
-		par->bmap_dba = par->obmap0;
 	}
 // con2fbmap 1 1
 // fbset  -fb /dev/fb1 1280x1024-60 -depth 8
@@ -1331,9 +1286,6 @@ printk("MODE OPTION %s\n", mode_option);
                 info->fix.id,
                 info->fix.mmio_start);
 
-	if (SYSFS && device_create_file(&pdev->dev, &dev_attr_visfx_sysfs))
-		dev_err(&pdev->dev, "Can't create sysfs regdump file\n");
-
 	return 0;
 
 err_out_dealloc_cmap:
@@ -1385,7 +1337,6 @@ static void visfx_probe_sti(struct sti_struct *sti, int enable)
 		fb_dealloc_cmap(&info->cmap);
 		framebuffer_release(info);
 		pci_iounmap(sti->pd, par->reg_base);
-		if (SYSFS) device_remove_file(info->dev, &dev_attr_visfx_sysfs);
 	}
 }
 
@@ -1409,7 +1360,6 @@ static void __exit visfx_remove(struct pci_dev *pdev)
 	fb_dealloc_cmap(&info->cmap);
 	kfree(par->edid);
 	framebuffer_release(info);
-	if (SYSFS) device_remove_file(&pdev->dev, &dev_attr_visfx_sysfs);
 }
 
 static const struct pci_device_id visfx_pci_tbl[] = {
