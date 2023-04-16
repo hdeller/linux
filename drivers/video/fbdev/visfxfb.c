@@ -7,6 +7,9 @@
  *
  *
  * insmod ~/visfxfb.ko mode_option=1366x768
+ * Tools:
+ * con2fbmap 1 1
+ * fbset  -fb /dev/fb1 1280x1024-60 -depth 8
  */
 
 #include <linux/module.h>
@@ -48,6 +51,7 @@
 
 static char *mode_option; /* empty means take video mode from ROM */
 
+/* const struct in ROM */
 struct visfx_default {
 	u8 __pad0[0x48];
 	u32 pll_core_0;
@@ -90,12 +94,6 @@ static void visfx_writel(struct fb_info *info, int reg, u32 val)
 	struct visfx_par *par = info->par;
 
 	return writel(cpu_to_le32(val), par->reg_base + reg);
-}
-
-static void visfx_writel_dump(struct fb_info *info, int reg, u32 val, u32 reference)
-{
-	// printk("DUMP  reg %08x <- %08x,   reference %08x\n", reg, val, reference);
-	return visfx_writel(info, reg, val);
 }
 
 static void visfx_write_vram(struct fb_info *info, int reg, u32 val)
@@ -256,7 +254,6 @@ static int visfx_setcolreg(unsigned regno, unsigned red, unsigned green,
 		r = (red >> 8) << 16;
 		g = (green >> 8) << 8;
 		b = (blue >> 8);
-		// if (regno < 2 || regno == 255) printk("visfx_setcolreg(%d) = %08x\n", regno, r | g | b);
 		set_clut:
 		visfx_writel(info, B2_LLCA, regno);
 		visfx_writel(info, B2_LUTD, r | g | b);
@@ -327,10 +324,13 @@ static void visfx_get_video_mode(struct fb_info *info)
 	var->xres = (tmp & 0xffff) + 1;
 	var->yres = (tmp >> 16) + 1;
 
+printk("x %d  y %d\n", var->xres, var->yres);
+
 	tmp = visfx_readl(info, B2_PLL_DOT_CTL);
 	n = (tmp & 0xff) + 1;
 	d = ((tmp >> 8) & 0xff) + 1;
 	var->pixclock = (VISFX_SYNC_PLL_BASE / d) * n;
+printk("pixclock %d\n", var->pixclock);
 
 	tmp = visfx_readl(info, B2_HTG);
 	var->left_margin = ((tmp >> 20) & 0x1ff) + 1;
@@ -347,7 +347,6 @@ static void visfx_get_video_mode(struct fb_info *info)
 		var->sync |= FB_SYNC_HOR_HIGH_ACT;
 	if (tmp & VISFX_VSYNC_POSITIVE)
 		var->sync |= FB_SYNC_VERT_HIGH_ACT;
-
 }
 
 static int visfx_wait_pll(struct fb_info *info)
@@ -422,14 +421,14 @@ static int visfx_set_par(struct fb_info *info)
 	vbp = var->upper_margin - 1;
 // printk("visfx_set_par %dx%d-%d\n", xres, yres, var->bits_per_pixel);
 
-	ret = visfx_set_pll(info, B2_PLL_DOT_CTL, var->pixclock); // 00527b0c
+	ret = visfx_set_pll(info, B2_PLL_DOT_CTL, var->pixclock);
 	if (ret)
 		return ret;
 
-	visfx_writel_dump(info, B2_HTG, (hbp << 20) | (hsw << 12) | (0xc << 8) | hfp, 0x14f33c7f);
-	visfx_writel_dump(info, B2_VTG, (vbp << 0) | (vsw << 8) | (vfp << 16), 0x260200); // vertauscht!!
-	visfx_writel_dump(info, B2_VHAL,((yres - 1) << 16) | (xres - 1), 0x437077f);
-	visfx_writel_dump(info, B2_ETG, 0x12260, 0);
+	visfx_writel(info, B2_HTG, (hbp << 20) | (hsw << 12) | (0xc << 8) | hfp);
+	visfx_writel(info, B2_VTG, (vbp << 0) | (vsw << 8) | (vfp << 16));
+	visfx_writel(info, B2_VHAL,((yres - 1) << 16) | (xres - 1));
+	visfx_writel(info, B2_ETG, 0x12260);
 	visfx_writel(info, B2_SCR, 0);
 	visfx_wclip(info, 0, 0, xres, yres);
 
@@ -438,12 +437,12 @@ static int visfx_set_par(struct fb_info *info)
 		tmp |= VISFX_HSYNC_POSITIVE;
 	if (var->sync & FB_SYNC_VERT_HIGH_ACT)
 		tmp |= VISFX_VSYNC_POSITIVE;
-	visfx_writel_dump(info, B2_CFG, tmp, 0);
+	visfx_writel(info, B2_CFG, tmp);
 	visfx_writel(info, B2_MPC, 0xc);
 
 	visfx_setup(info);
 
-	return 0;
+	return visfx_wait_write_pipe_empty(info);
 }
 
 static int visfx_check_var(struct fb_var_screeninfo *var, struct fb_info *info)
@@ -488,6 +487,7 @@ static int visfx_check_var(struct fb_var_screeninfo *var, struct fb_info *info)
 	var->height = -1;
 	var->width = -1;
 	var->vmode = FB_VMODE_NONINTERLACED;
+	var->accel_flags = info->flags;
 
 	return 0;
 }
@@ -615,7 +615,7 @@ int visfx_set_default_mode(struct fb_info *info)
 
 	visfx_writel(info, B2_HTG, visfx_readl(info, 0x50038));
 	visfx_writel(info, B2_VTG, visfx_readl(info, 0x5003c));
-	visfx_writel(info, B2_CFG, visfx_readl(info, 0x50040)); // 0 ??
+	visfx_writel(info, B2_CFG, visfx_readl(info, 0x50040));
 
 	tmp = (visfx_readl(info, 0x50024) & 0xffff0000) |
 		(visfx_readl(info, 0x50020) & 0xffff);
@@ -624,7 +624,6 @@ int visfx_set_default_mode(struct fb_info *info)
 
 	visfx_writel(info, B2_ETG, visfx_readl(info, 0x50044));
 	visfx_writel(info, B2_SCR, visfx_readl(info, 0x5004c));
-	tmp = visfx_readl(info, 0x50054);
 	visfx_writel(info, B2_IMD, 2);
 	return 0;
 }
@@ -661,7 +660,7 @@ static void visfx_clear_buffer(struct fb_info *info, u32 dba, u32 bmap_dba, u32 
 	visfx_writel(info, B2_CPE, 0);
 	visfx_writel(info, B2_MBWB, mbwb);
 	visfx_writel(info, B2_MNOOP_R0R1, 0);
-	visfx_writel(info, B2_SOLIDFILL_R2R3_REMAP, var->xres<<16 | var->yres); // 0x06400240);
+	visfx_writel(info, B2_SOLIDFILL_R2R3_REMAP, var->xres<<16 | var->yres);
 }
 
 static void visfx_setup(struct fb_info *info)
@@ -713,7 +712,7 @@ static void visfx_setup(struct fb_info *info)
 	visfx_writel(info, B2_SB, 0);
 	visfx_writel(info, B2_WCE, 0);
 	visfx_writel(info, B2_CPE, 0);
-	visfx_writel(info, B2_ZBO, 0x00080000); // oder 0x66666666 oder 0x3010030f
+	visfx_writel(info, B2_ZBO, 0x00080000);
 	visfx_writel(info, B2_RTG_MEM_LOAD, 0xc9200); // bits 21:2 of host address XXX
 	visfx_writel(info, B2_TM_TSS, 0);
 	visfx_writel(info, B2_FCDA, 0);
@@ -730,7 +729,7 @@ static void visfx_setup(struct fb_info *info)
 	par->ibmap0 = 0x02681002;
 	par->bmap_z = 0x13090006;
 	par->obmap0 = 0x23a80000 | var->xres / 2;
-	par->ibmap1 = 0x27e00002; // 0x27d00e02
+	par->ibmap1 = 0x27e00002;
 
 	visfx_setup_and_wait(info, B2_ABMAP, par->abmap);
 	visfx_setup_and_wait(info, B2_IBMAP0, par->ibmap0);
@@ -755,7 +754,7 @@ static void visfx_setup(struct fb_info *info)
 
 	visfx_wclip(info, 0, 0, var->xres, var->yres);
 	visfx_clear_buffer(info, 0x05000880, par->ibmap0, 0x03f00000, 0);
-	visfx_clear_buffer(info, 0x05000880, par->obmap0, 0x00fc0000, 0);
+	visfx_clear_buffer(info, 0x05000880, par->obmap0, 0x00fc0000, (var->bits_per_pixel == 32) ? 0xffffffff : 0);
 	visfx_clear_buffer(info, 0x05000880, par->abmap,  0x00900000, 0);
 
 	visfx_writel(info, B2_PMASK, 0xff);
@@ -769,8 +768,7 @@ static void visfx_setup(struct fb_info *info)
 		visfx_writel(info, B2_LUTD, 0x010101 * i);
 	}
 
-	visfx_clear_buffer(info, 0x00000a00, par->ibmap0, 0x03f00000, 0);
-	visfx_clear_buffer(info, 0x05000880, par->obmap0, 0x00fc0000, 0xffffffff);
+	// visfx_clear_buffer(info, 0x00000a00, par->ibmap0, 0x03f00000, 0);
 	visfx_buffer_setup(info, 2, 0x08000084, 0, 0);  // 8000084 für Overlay
 
 	visfx_wait_write_pipe_empty(info);
@@ -779,10 +777,9 @@ static void visfx_setup(struct fb_info *info)
 	info->fix.accel = FB_ACCEL_NONE;
 	info->fix.type = FB_TYPE_PACKED_PIXELS;
 	info->fix.line_length = 2048 * var->bits_per_pixel / 8;
-	// info->fix.smem_len = PAGE_ALIGN(info->fix.line_length * var->yres);
 
 	switch (var->bits_per_pixel) {
-	case 32:
+	default:
 		info->fix.visual = FB_VISUAL_TRUECOLOR;
 		var->red.length = 8;
 		var->red.offset = 8;
@@ -793,7 +790,7 @@ static void visfx_setup(struct fb_info *info)
 		var->transp.length = 8;
 		var->transp.offset = 0;
 		break;
-	default:
+	case 8:
 		info->fix.visual = FB_VISUAL_PSEUDOCOLOR;
 		var->red.length = 8;
 		var->red.offset = 0;
@@ -830,8 +827,6 @@ static void visfx_setup(struct fb_info *info)
 		// visfx_writel(info, B2_FATTR, 0);
 		visfx_writel(info, B2_FATTR, 1<<7 | 1<<4); // -> CFS16  -> force Overlay!
 	}
-// con2fbmap 1 1
-// fbset  -fb /dev/fb1 1280x1024-60 -depth 8
 
 	visfx_writel(info, B2_BMAP_BABoth, par->bmap_dba);  // WOW !!!!!
 	visfx_writel(info, B2_BABoth, par->dba);
@@ -918,7 +913,7 @@ static int __init visfx_initialize(struct fb_info *info)
 	return 0;
 }
 
-static int __init visfx_check_defaults(struct fb_info *info)
+static int __init visfx_get_rom_defaults(struct fb_info *info)
 {
 	struct visfx_par *par = info->par;
 	u32 offset, id;
@@ -985,21 +980,18 @@ static int __init visfx_init_device(struct pci_dev *pdev, struct sti_struct *sti
 		return -ENOMEM;
 
 	pci_set_drvdata(pdev, info);
-	if (sti)
-		sti->info = info;
-
 	par = info->par;
 	par->info = info;
-
-	if (sti)
-		par->reg_base = pci_iomap(pdev, 0, VISFX_FB_OFFSET + VISFX_FB_LENGTH);
-	else
-		par->reg_base = pcim_iomap_table(pdev)[0];
-
 	par->reg_size = pci_resource_len(pdev, 0);
 	par->dev = &pdev->dev;
 
-	ret = visfx_check_defaults(info);
+	if (sti) {
+		sti->info = info;
+		par->reg_base = pci_iomap(pdev, 0, VISFX_FB_OFFSET + VISFX_FB_LENGTH);
+	} else
+		par->reg_base = pcim_iomap_table(pdev)[0];
+
+	ret = visfx_get_rom_defaults(info);
 	if (ret)
 		goto err_out_free;
 
@@ -1018,7 +1010,9 @@ static int __init visfx_init_device(struct pci_dev *pdev, struct sti_struct *sti
 	if (ret)
 		goto err_out_free;
 
-if (!mode_option)	mode_option = "1024x768";
+	visfx_get_video_mode(info);
+
+if (!mode_option)	mode_option = "1280x1024@60";
 
 printk("MODE OPTION %s\n", mode_option);
 	visfx_setup(info);
@@ -1028,9 +1022,6 @@ printk("MODE OPTION %s\n", mode_option);
 
 	if (visfx_check_var(&info->var, info) == 0)
 		visfx_set_par(info);
-
-	info->var.accel_flags = info->flags;
-	visfx_get_video_mode(info);
 
 	ret = register_framebuffer(info);
 	if (ret)
