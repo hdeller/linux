@@ -17,7 +17,6 @@
 #include <linux/fb.h>
 #include <linux/delay.h>
 #include <linux/rational.h>
-#include <linux/i2c-algo-bit.h>
 
 #include <asm/grfioctl.h>
 
@@ -45,7 +44,7 @@
 #define MIN_XRES	640
 #define MIN_YRES	480
 
-#define DEFAULT_BPP	32
+#define DEFAULT_BPP	8 // 32
 
 static char *mode_option; /* empty means take video mode from ROM */
 
@@ -75,9 +74,6 @@ struct visfx_par {
 	struct device *dev;
 
 	struct fb_info *info;
-	struct i2c_adapter adapter;
-	struct i2c_algo_bit_data algo;
-	u8 *edid;
 };
 
 static void visfx_setup(struct fb_info *info);
@@ -444,7 +440,6 @@ static int visfx_set_par(struct fb_info *info)
 		tmp |= VISFX_VSYNC_POSITIVE;
 	visfx_writel_dump(info, B2_CFG, tmp, 0);
 	visfx_writel(info, B2_MPC, 0xc);
-	// visfx_get_video_mode(info);
 
 	visfx_setup(info);
 
@@ -1013,184 +1008,6 @@ static int __init visfx_check_defaults(struct fb_info *info)
 	return 0;
 }
 
-
-/* DDC support */
-
-#define SCL_PIN		BIT(3)
-#define SDA_PIN		BIT(2)
-#define SCL_REG		BIT(1)
-#define SDA_REG		BIT(0)
-#define DDC_MASK	(SCL_REG | SDA_REG);
-
-static void visfx_setscl(void *data, int state)
-{
-	struct visfx_par *par = data;
-	u32 val;
-
-	val = visfx_readl(par->info, B2_DDC) & DDC_MASK;
-	if (state)
-		val |= SCL_REG;
-	else
-		val &= ~SCL_REG;
-	visfx_writel(par->info, B2_DDC, val);
-}
-
-static void visfx_setsda(void *data, int state)
-{
-	struct visfx_par *par = data;
-	u32 val;
-
-	val = visfx_readl(par->info, B2_DDC) & DDC_MASK;
-	if (state)
-		val |= SDA_REG;
-	else
-		val &= ~SDA_REG;
-	visfx_writel(par->info, B2_DDC, val);
-}
-
-static int visfx_getscl(void *data)
-{
-	struct visfx_par *par = data;
-	u32 val = 0;
-
-	val = visfx_readl(par->info, B2_DDC);
-	val = (val & SCL_PIN) ? 1 : 0;
-//  printk("scl = %d\n", val);
-
-	return val;
-}
-
-static int visfx_getsda(void *data)
-{
-	struct visfx_par *par = data;
-	u32 val = 0;
-
-	val = visfx_readl(par->info, B2_DDC);
-	val = (val & SDA_PIN) ? 1 : 0;
-// printk("sda = %d\n", val);
-
-	return val;
-}
-
-static int visfx_setup_i2c_bus(struct visfx_par *par,
-				unsigned int i2c_class)
-{
-	int rc;
-	static const char name[] = "VisFX-DDC";
-
-	strscpy(par->adapter.name, name, sizeof(par->adapter.name));
-	par->adapter.owner = THIS_MODULE;
-	par->adapter.class = i2c_class;
-	par->adapter.algo_data = &par->algo;
-	par->adapter.dev.parent = par->dev;
-	par->algo.setsda = visfx_setsda;
-	par->algo.setscl = visfx_setscl;
-	par->algo.getsda = visfx_getsda;
-	par->algo.getscl = visfx_getscl;
-	par->algo.udelay = 10;
-	par->algo.timeout = msecs_to_jiffies(2);
-	par->algo.data = par;
-
-	i2c_set_adapdata(&par->adapter, par);
-
-	/* Raise SCL and SDA */
-	visfx_setsda(par, 1);
-	visfx_setscl(par, 1);
-	udelay(20);
-
-	rc = i2c_bit_add_bus(&par->adapter);
-	if (rc == 0)
-		dev_dbg(par->dev,
-			"I2C bus %s registered.\n", name);
-	else {
-		dev_warn(par->dev,
-			 "Failed to register I2C bus %s.\n", name);
-	}
-
-	return rc;
-}
-
-static void __init visfx_create_i2c_busses(struct visfx_par *par)
-{
-	visfx_setup_i2c_bus(par, I2C_CLASS_DDC);
-}
-
-static void visfx_delete_i2c_busses(struct visfx_par *par)
-{
-	i2c_del_adapter(&par->adapter);
-}
-
-static int __init visfx_probe_i2c_connector(struct fb_info *info, u8 **out_edid)
-{
-	struct visfx_par *par = info->par;
-	u8 *edid;
-
-	edid = fb_ddc_read(&par->adapter);
-// printk("edid1 %px    %*ph\n", edid, 20, edid);
-
-	*out_edid = edid;
-
-	return (edid) ? 0 : 1;
-}
-
-static void __init visfx_find_init_mode(struct fb_info *info)
-{
-	struct fb_videomode mode;
-	struct fb_var_screeninfo var;
-	struct fb_monspecs *specs = &info->monspecs;
-	int found = 0;
-	struct visfx_par *par = info->par;
-
-	INIT_LIST_HEAD(&info->modelist);
-	memset(&mode, 0, sizeof(struct fb_videomode));
-	var = info->var;
-
-	visfx_create_i2c_busses(par);
-
-	if (!visfx_probe_i2c_connector(info, &par->edid))
-		printk("visfxfb_init_pci: DDC probe successful\n");
-printk("bbbbbbb  par->edid = %px\n", par->edid);
-
-	fb_edid_to_monspecs(par->edid, specs);
-
-printk("Monitor:  %s\n", specs->monitor);
-
-	if (specs->modedb == NULL)
-		printk("visfxfb_init_pci: Unable to get Mode Database\n");
-
-	fb_videomode_to_modelist(specs->modedb, specs->modedb_len,
-				 &info->modelist);
-	if (specs->modedb != NULL) {
-		const struct fb_videomode *m;
-
-		if (1) {   // xres && yres) {
-			if ((m = fb_find_best_mode(&var, &info->modelist))) {
-				mode = *m;
-				found  = 1;
-			}
-		}
-
-		if (!found) {
-			m = fb_find_best_display(&info->monspecs, &info->modelist);
-			mode = *m;
-			found = 1;
-		}
-
-		fb_videomode_to_var(&var, &mode);
-	}
-
-if (!mode_option)
-		mode_option="1366x768";
-	if (mode_option)
-		fb_find_mode(&var, info, mode_option, specs->modedb,
-			     specs->modedb_len, (found) ? &mode : NULL,
-			     info->var.bits_per_pixel);
-
-	info->var = var;
-	fb_destroy_modedb(specs->modedb);
-	specs->modedb = NULL;
-}
-
 /* setup */
 
 static void __init visfx_setup_info(struct pci_dev *pdev, struct fb_info *info)
@@ -1260,20 +1077,19 @@ static int __init visfx_init_device(struct pci_dev *pdev, struct sti_struct *sti
 	if (ret)
 		goto err_out_free;
 
+if (!mode_option)	mode_option = "1024x768";
 
 printk("MODE OPTION %s\n", mode_option);
 	visfx_setup(info);
-	visfx_find_init_mode(info);
+
+	if (mode_option &&
+	    fb_find_mode(&info->var, info, mode_option, NULL, 0, NULL, DEFAULT_BPP));
+
 	if (visfx_check_var(&info->var, info) == 0)
 		visfx_set_par(info);
-	else
-#if 0
-	if (mode_option &&
-	    fb_find_mode(&info->var, info, mode_option, NULL, 0, NULL, DEFAULT_BPP) &&
-#endif
 
-	visfx_get_video_mode(info);
 	info->var.accel_flags = info->flags;
+	visfx_get_video_mode(info);
 
 	ret = register_framebuffer(info);
 	if (ret)
@@ -1291,8 +1107,6 @@ printk("MODE OPTION %s\n", mode_option);
 err_out_dealloc_cmap:
 	fb_dealloc_cmap(&info->cmap);
 err_out_free:
-	visfx_delete_i2c_busses(par);
-	kfree(par->edid);
 	framebuffer_release(info);
 	return ret;
 }
@@ -1353,12 +1167,9 @@ static int __init visfx_options(char *options)
 static void __exit visfx_remove(struct pci_dev *pdev)
 {
 	struct fb_info *info = pci_get_drvdata(pdev);
-	struct visfx_par *par = info->par;
 
-	visfx_delete_i2c_busses(par);
 	unregister_framebuffer(info);
 	fb_dealloc_cmap(&info->cmap);
-	kfree(par->edid);
 	framebuffer_release(info);
 }
 
