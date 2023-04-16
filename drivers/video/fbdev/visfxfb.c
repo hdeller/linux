@@ -460,7 +460,7 @@ static int visfx_check_var(struct fb_var_screeninfo *var, struct fb_info *info)
 		var->xres > 2048 ||
 		var->yres > 2048)
 		return -EINVAL;
-// printk("visfx_check_var  bpp %d\n", var->bits_per_pixel);
+
 	if (var->bits_per_pixel == 24)
 		var->bits_per_pixel = 32;
 	if (var->bits_per_pixel != 8 && var->bits_per_pixel != 32)
@@ -484,71 +484,11 @@ static int visfx_check_var(struct fb_var_screeninfo *var, struct fb_info *info)
 	var->blue   = v->blue;
 	var->transp = v->transp;
 
-	return 0;
-}
+	var->nonstd = 0;
+	var->height = -1;
+	var->width = -1;
+	var->vmode = FB_VMODE_NONINTERLACED;
 
-static void visfx_update_cursor_image_line(struct fb_info *info,
-					   struct fb_cursor *cursor, int y)
-{
-	unsigned int x, bytecnt;
-	u32 data[2] = { 0 };
-	u8 d, m;
-
-	bytecnt = ((cursor->image.width - 1) / 8) + 1;
-
-	for (x = 0; x < bytecnt && x < 8; x++) {
-		m = cursor->mask[y * bytecnt + x];
-		d = cursor->image.data[y * bytecnt + x];
-
-		if (cursor->rop == ROP_XOR)
-			((u8 *)data)[x] = d ^ m;
-		else
-			((u8 *)data)[x] = d & m;
-	}
-
-	if (cursor->image.width < 32)
-		data[0] &= GENMASK(31, 31 - cursor->image.width + 1);
-	visfx_writel(info, UB_CD, data[0]);
-	if (cursor->image.width < 64)
-		data[0] &= GENMASK(31, 63 - cursor->image.width + 1);
-	visfx_writel(info, UB_CD, data[1]);
-}
-
-static void visfx_update_cursor_image(struct fb_info *info,
-				      struct fb_cursor *cursor)
-{
-	int y, height = cursor->image.height;
-
-	if (height > 128)
-		height = 128;
-
-	visfx_writel(info, UB_CA, 0);
-	for (y = 0; y < height; y++)
-		visfx_update_cursor_image_line(info, cursor, y);
-
-	for (; y < 256; y++)
-		visfx_writel(info, UB_CD, 0);
-}
-
-static int visfx_cursor(struct fb_info *info, struct fb_cursor *cursor)
-{
-	u32 cp, color;
-
-	cp = (cursor->image.dx << 16) | (cursor->image.dy & 0xffff);
-	visfx_writel(info, UB_CP, cp);
-
-	if (cursor->set & (FB_CUR_SETIMAGE|FB_CUR_SETSHAPE))
-		visfx_update_cursor_image(info, cursor);
-
-	if (cursor->set & FB_CUR_SETCMAP) {
-		color = visfx_cmap_entry(&info->cmap, cursor->image.fg_color);
-		visfx_writel(info, UB_CB, color);
-	}
-
-	if (cursor->enable) {
-		cp |= UB_CP_CURSOR_ENABLE;
-		visfx_writel(info, UB_CP, cp);
-	}
 	return 0;
 }
 
@@ -561,7 +501,6 @@ static const struct fb_ops visfx_ops = {
 	.fb_set_par	= visfx_set_par,
 	.fb_blank	= visfx_blank,
 	.fb_check_var	= visfx_check_var,
-	// .fb_cursor	= visfx_cursor,
 };
 
 static void visfx_bus_error_timer_enable(struct fb_info *info, bool enable)
@@ -840,7 +779,7 @@ static void visfx_setup(struct fb_info *info)
 	info->fix.accel = FB_ACCEL_NONE;
 	info->fix.type = FB_TYPE_PACKED_PIXELS;
 	info->fix.line_length = 2048 * var->bits_per_pixel / 8;
-	info->fix.smem_len = PAGE_ALIGN(info->fix.line_length * var->yres);
+	// info->fix.smem_len = PAGE_ALIGN(info->fix.line_length * var->yres);
 
 	switch (var->bits_per_pixel) {
 	case 32:
