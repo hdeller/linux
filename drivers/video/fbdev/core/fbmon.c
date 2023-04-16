@@ -39,7 +39,7 @@
  * EDID parser
  */
 
-#define DEBUG  /* define this for verbose EDID parsing output */
+#undef DEBUG  /* define this for verbose EDID parsing output */
 
 #ifdef DEBUG
 #define DPRINTK(fmt, args...) printk(fmt,## args)
@@ -939,19 +939,14 @@ void fb_edid_to_monspecs(unsigned char *edid, struct fb_monspecs *specs)
 	unsigned char *block;
 	int i, found = 0;
 
-printk("0000000000\n");
 	if (edid == NULL)
 		return;
-printk("1111111111\n");
 
 	if (!(edid_checksum(edid)))
 		return;
 
-printk("222222222\n");
-
 	if (!(edid_check_header(edid)))
 		return;
-printk("333333333333\n");
 
 	memset(specs, 0, sizeof(struct fb_monspecs));
 
