@@ -168,16 +168,18 @@ static void visfx_imageblit_mono(struct fb_info *info, const char *data, int dx,
 				 int width, int height, int fg_color, int bg_color)
 {
 	int _width, x;
+	u32 bpm;
 
 	// B2_DBA_BIN8F | B2_DBA_OTC01 | B2_DBA_DIRECT | B2_DBA_D;  -> B2_DBA_OTC(5) | B2_DBA_S | B2_DBA_IND_BG_FG);
 	// B2_DBA_BIN8I | B2_DBA_OTC04 | B2_DBA_DIRECT | B2_DBA_D;
 	// visfx_writel(info, B2_DBA, par->dba | B2_DBA_S | B2_DBA_IND_BG_FG);
 	visfx_writel(info, B2_DBA, B2_DBA_OTC(5) | B2_DBA_S | B2_DBA_IND_BG_FG);
 	visfx_set_bmove_color(info, fg_color, bg_color);
+	bpm = (info->fix.visual == FB_VISUAL_PSEUDOCOLOR) ? 0xff << 24 : 0xffffffff;
 	visfx_writel(info, B2_BPM, 0xffffffff);
 
 	for (x = 0, _width = width; _width > 0; _width -= 32, x += 4) {
-		visfx_set_vram_addr(info, dx + x * 32, dy);
+		visfx_set_vram_addr(info, dx + x * 8, dy);
 		if (_width >= 32)
 			visfx_copyline(info, data, x, width, height, 4);
 		else {
@@ -185,7 +187,7 @@ static void visfx_imageblit_mono(struct fb_info *info, const char *data, int dx,
 			visfx_copyline(info, data, x, width, height, LINESIZE(_width));
 		}
 	}
-	visfx_writel(info, B2_BPM, 0xffffffff);
+	// visfx_writel(info, B2_BPM, bpm);
 }
 
 static void visfx_imageblit(struct fb_info *info, const struct fb_image *image)
