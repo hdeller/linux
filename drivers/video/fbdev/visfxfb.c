@@ -235,16 +235,6 @@ static void visfx_fillrect(struct fb_info *info, const struct fb_fillrect *fr)
 
 static void visfx_copyarea(struct fb_info *info, const struct fb_copyarea *area)
 {
-	static int x;
-	if (0)
-		return cfb_copyarea(info, area);
-	WARN_ONCE(x++ == 80, "HALLO");
-
-	// visfx_writel(info, B2_IPM, 0xffffffff);
-	// B2_BABoth                                              2000000 0
-	// B2_MNOOP_R4R5                    MOVE START                474 0 MOVE START: 0x1140
-	// B2_MNOOP_R2R3                    MOVE HEIGHT           3020014 0 SIZE: 770x20
-	// B2_BLT_R0R1                      MOVE DEST                 460 0 MOVE DST: 0x1120
 	visfx_writel(info, B2_MNOOP_R4R5, (area->sx << 16) | area->sy);
 	visfx_writel(info, B2_MNOOP_R2R3, (area->width << 16) | area->height);
 	visfx_writel(info, B2_BLT_R0R1, (area->dx << 16) | area->dy);
@@ -336,13 +326,12 @@ static void visfx_get_video_mode(struct fb_info *info)
 	var->xres = (tmp & 0xffff) + 1;
 	var->yres = (tmp >> 16) + 1;
 
-printk("x %d  y %d\n", var->xres, var->yres);
+// printk("x %d  y %d\n", var->xres, var->yres);
 
 	tmp = visfx_readl(info, B2_PLL_DOT_CTL);
 	n = (tmp & 0xff) + 1;
 	d = ((tmp >> 8) & 0xff) + 1;
 	var->pixclock = (VISFX_SYNC_PLL_BASE / d) * n;
-printk("pixclock %d\n", var->pixclock);
 
 	tmp = visfx_readl(info, B2_HTG);
 	var->left_margin = ((tmp >> 20) & 0x1ff) + 1;
