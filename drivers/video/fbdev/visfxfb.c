@@ -126,8 +126,14 @@ static void visfx_set_vram_addr(struct fb_info *info, int x, int y)
 	visfx_writel(info, B2_DWA, (y << 16) | x);
 }
 
-static u32 visfx_cmap_entry(struct fb_cmap *cmap, int color)
+static u32 visfx_cmap_entry(struct fb_info *info, int color)
 {
+	struct fb_cmap *cmap;
+
+	if (info->fix.visual == FB_VISUAL_PSEUDOCOLOR)
+		return color;
+
+	cmap = &info->cmap;
 	return (((cmap->blue[color] & 0xff) << 0) |
 		((cmap->green[color] & 0xff) << 8) |
 		(cmap->red[color] & 0xff) << 16);
@@ -135,8 +141,8 @@ static u32 visfx_cmap_entry(struct fb_cmap *cmap, int color)
 
 static void visfx_set_bmove_color(struct fb_info *info, int fg, int bg)
 {
-	visfx_writel(info, B2_IBC, visfx_cmap_entry(&info->cmap, bg));
-	visfx_writel(info, B2_IFC, visfx_cmap_entry(&info->cmap, fg));
+	visfx_writel(info, B2_IBC, visfx_cmap_entry(info, bg));
+	visfx_writel(info, B2_IFC, visfx_cmap_entry(info, fg));
 }
 
 static void visfx_wclip(struct fb_info *info, int x1, int y1, int x2, int y2)
@@ -171,7 +177,7 @@ static void visfx_imageblit_mono(struct fb_info *info, const char *data, int dx,
 	visfx_writel(info, B2_BPM, 0xffffffff);
 
 	for (x = 0, _width = width; _width > 0; _width -= 32, x += 4) {
-		visfx_set_vram_addr(info, dx + x * 8, dy);
+		visfx_set_vram_addr(info, dx + x * 32, dy);
 		if (_width >= 32)
 			visfx_copyline(info, data, x, width, height, 4);
 		else {
@@ -187,21 +193,23 @@ static void visfx_imageblit(struct fb_info *info, const struct fb_image *image)
 	struct visfx_par *par = info->par;
 	int x, y;
 
-	if (info->fix.visual == FB_VISUAL_PSEUDOCOLOR)
-		return cfb_imageblit(info, image);
-
 	visfx_wait_write_pipe_empty(info);
 
 	switch (image->depth) {
 	case 1:
+		if (info->fix.visual == FB_VISUAL_PSEUDOCOLOR)
+			return cfb_imageblit(info, image);
+
 		visfx_imageblit_mono(info, image->data, image->dx, image->dy,
 				     image->width, image->height,
 				     image->fg_color, image->bg_color);
 		break;
 	case 8:
+		if (info->fix.visual == FB_VISUAL_PSEUDOCOLOR)
+			return cfb_imageblit(info, image);
+
 		visfx_writel(info, B2_DBA, B2_DBA_OTC01 | B2_DBA_DIRECT);
 		visfx_writel(info, B2_BPM, 0xffffffff);
-		// visfx_wclip(info, 0, 0, info->var.xres, info->var.yres);
 
 		for (y = 0; y < image->height; y++) {
 			visfx_set_vram_addr(info, image->dx, image->dy + y);
@@ -214,8 +222,7 @@ static void visfx_imageblit(struct fb_info *info, const struct fb_image *image)
 		break;
 
 	default:
-		dev_err(par->dev, "depth %d not supported\n", image->depth);
-		break;
+		return cfb_imageblit(info, image);
 	}
 
 	visfx_writel(info, B2_DBA, par->dba);
@@ -492,6 +499,73 @@ static int visfx_check_var(struct fb_var_screeninfo *var, struct fb_info *info)
 	return 0;
 }
 
+static void visfx_update_cursor_image_line(struct fb_info *info,
+					   struct fb_cursor *cursor, int y)
+{
+	unsigned int x, bytecnt;
+	u32 data[2] = { 0 };
+	u8 d, m;
+
+	bytecnt = ((cursor->image.width - 1) / 8) + 1;
+
+	for (x = 0; x < bytecnt && x < 8; x++) {
+		m = cursor->mask[y * bytecnt + x];
+		d = cursor->image.data[y * bytecnt + x];
+
+		if (cursor->rop == ROP_XOR)
+			((u8 *)data)[x] = d ^ m;
+		else
+			((u8 *)data)[x] = d & m;
+	}
+
+	if (cursor->image.width < 32)
+		data[0] &= GENMASK(31, 31 - cursor->image.width + 1);
+	visfx_writel(info, UB_CD, data[0]);
+	if (cursor->image.width < 64)
+		data[0] &= GENMASK(31, 63 - cursor->image.width + 1);
+	visfx_writel(info, UB_CD, data[1]);
+}
+
+static void visfx_update_cursor_image(struct fb_info *info,
+				      struct fb_cursor *cursor)
+{
+	int y, height = cursor->image.height;
+
+	WARN_ONCE(1, "HALLO2");
+
+	if (height > 128)
+		height = 128;
+
+	visfx_writel(info, UB_CA, 0);
+	for (y = 0; y < height; y++)
+		visfx_update_cursor_image_line(info, cursor, y);
+
+	for (; y < 256; y++)
+		visfx_writel(info, UB_CD, 0);
+}
+
+static int visfx_cursor(struct fb_info *info, struct fb_cursor *cursor)
+{
+	u32 cp, color;
+
+	cp = (cursor->image.dx << 16) | (cursor->image.dy & 0xffff);
+	visfx_writel(info, UB_CP, cp);
+
+	if (cursor->set & (FB_CUR_SETIMAGE|FB_CUR_SETSHAPE))
+		visfx_update_cursor_image(info, cursor);
+
+	if (cursor->set & FB_CUR_SETCMAP) {
+		color = visfx_cmap_entry(info, cursor->image.fg_color);
+		visfx_writel(info, UB_CB, color);
+	}
+
+	if (cursor->enable) {
+		cp |= UB_CP_CURSOR_ENABLE;
+		visfx_writel(info, UB_CP, cp);
+	}
+	return 0;
+}
+
 static const struct fb_ops visfx_ops = {
 	.owner		= THIS_MODULE,
 	.fb_check_var	= visfx_check_var,
@@ -501,6 +575,7 @@ static const struct fb_ops visfx_ops = {
 	.fb_fillrect	= visfx_fillrect,
 	.fb_copyarea    = visfx_copyarea,
 	.fb_imageblit	= visfx_imageblit,
+	// .fb_cursor	= visfx_cursor,
 	.fb_sync	= visfx_sync,
 };
 
