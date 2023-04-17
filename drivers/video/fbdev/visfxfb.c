@@ -225,8 +225,6 @@ static void visfx_fillrect(struct fb_info *info, const struct fb_fillrect *fr)
 {
 	struct visfx_par *par = info->par;
 
-	visfx_wait_write_pipe_empty(info);
-
 	visfx_writel(info, B2_DBA, B2_DBA_OTC(5) | B2_DBA_S | B2_DBA_IND_BG_FG);
 	visfx_set_bmove_color(info, fr->color, 0);
 	visfx_writel(info, B2_MNOOP_R0R1, (fr->dx << 16) | fr->dy);
@@ -235,6 +233,22 @@ static void visfx_fillrect(struct fb_info *info, const struct fb_fillrect *fr)
 	visfx_writel(info, B2_DBA, par->dba);
 }
 
+static void visfx_copyarea(struct fb_info *info, const struct fb_copyarea *area)
+{
+	static int x;
+	if (0)
+		return cfb_copyarea(info, area);
+	WARN_ONCE(x++ == 80, "HALLO");
+
+	// visfx_writel(info, B2_IPM, 0xffffffff);
+	// B2_BABoth                                              2000000 0
+	// B2_MNOOP_R4R5                    MOVE START                474 0 MOVE START: 0x1140
+	// B2_MNOOP_R2R3                    MOVE HEIGHT           3020014 0 SIZE: 770x20
+	// B2_BLT_R0R1                      MOVE DEST                 460 0 MOVE DST: 0x1120
+	visfx_writel(info, B2_MNOOP_R4R5, (area->sx << 16) | area->sy);
+	visfx_writel(info, B2_MNOOP_R2R3, (area->width << 16) | area->height);
+	visfx_writel(info, B2_BLT_R0R1, (area->dx << 16) | area->dy);
+}
 
 static int visfx_setcolreg(unsigned regno, unsigned red, unsigned green,
                              unsigned blue, unsigned transp,
@@ -278,13 +292,6 @@ static int visfx_setcolreg(unsigned regno, unsigned red, unsigned green,
 	return 0;
 }
 
-/**
- * visfx_blank() - blank or unblank the given window
- * @blank_mode: The blank state from FB_BLANK_*
- * @info: The framebuffer to blank.
- *
- * Framebuffer layer request to change the power state.
- */
 static int visfx_blank(int blank_mode, struct fb_info *info)
 {
 	u32 mpc;
@@ -313,6 +320,11 @@ static int visfx_blank(int blank_mode, struct fb_info *info)
 	return 0;
 }
 
+int visfx_sync(struct fb_info *info)
+{
+	visfx_wait_write_pipe_empty(info);
+	return 0;
+}
 
 static void visfx_get_video_mode(struct fb_info *info)
 {
@@ -419,7 +431,6 @@ static int visfx_set_par(struct fb_info *info)
 	vsw = var->vsync_len - 1;
 	vfp = var->lower_margin - 1;
 	vbp = var->upper_margin - 1;
-// printk("visfx_set_par %dx%d-%d\n", xres, yres, var->bits_per_pixel);
 
 	ret = visfx_set_pll(info, B2_PLL_DOT_CTL, var->pixclock);
 	if (ret)
@@ -494,13 +505,14 @@ static int visfx_check_var(struct fb_var_screeninfo *var, struct fb_info *info)
 
 static const struct fb_ops visfx_ops = {
 	.owner		= THIS_MODULE,
-	.fb_setcolreg	= visfx_setcolreg,
-	.fb_fillrect	= visfx_fillrect,
-        // .fb_copyarea    = stifb_copyarea,
-	.fb_imageblit	= visfx_imageblit,
-	.fb_set_par	= visfx_set_par,
-	.fb_blank	= visfx_blank,
 	.fb_check_var	= visfx_check_var,
+	.fb_set_par	= visfx_set_par,
+	.fb_setcolreg	= visfx_setcolreg,
+	.fb_blank	= visfx_blank,
+	.fb_fillrect	= visfx_fillrect,
+	.fb_copyarea    = visfx_copyarea,
+	.fb_imageblit	= visfx_imageblit,
+	.fb_sync	= visfx_sync,
 };
 
 static void visfx_bus_error_timer_enable(struct fb_info *info, bool enable)
@@ -951,8 +963,8 @@ static void __init visfx_setup_info(struct pci_dev *pdev, struct fb_info *info)
 	struct visfx_par *par = info->par;
 
 	info->fbops = &visfx_ops;
-	info->flags = FBINFO_HWACCEL_FILLRECT | FBINFO_HWACCEL_IMAGEBLIT;
-		/* TODO: FBINFO_HWACCEL_COPYAREA */
+	info->flags = FBINFO_HWACCEL_FILLRECT | FBINFO_HWACCEL_IMAGEBLIT |
+			FBINFO_HWACCEL_COPYAREA | FBINFO_READS_FAST;
 	info->pseudo_palette = par->pseudo_palette;
 	info->screen_base = par->reg_base + VISFX_FB_OFFSET;
 
@@ -973,6 +985,7 @@ static int __init visfx_init_device(struct pci_dev *pdev, struct sti_struct *sti
 {
 	struct visfx_par *par;
 	struct fb_info *info;
+	char mode[64];
 	int ret;
 
 	info = framebuffer_alloc(sizeof(struct visfx_par), &pdev->dev);
@@ -1005,23 +1018,23 @@ static int __init visfx_init_device(struct pci_dev *pdev, struct sti_struct *sti
 		goto err_out_free;
 
 	info->var.bits_per_pixel = DEFAULT_BPP;
-
 	ret = fb_alloc_cmap(&info->cmap, 256, 0);
 	if (ret)
 		goto err_out_free;
 
 	visfx_get_video_mode(info);
 
-if (!mode_option)	mode_option = "1280x1024@60";
+	if (!mode_option) {
+		scnprintf(mode, sizeof(mode), "%dx%d@60",
+			info->var.xres, info->var.yres);
+		mode_option = mode;
+	}
 
-printk("MODE OPTION %s\n", mode_option);
-	visfx_setup(info);
+// printk("MODE OPTION %s\n", mode_option);
 
-	if (mode_option &&
-	    fb_find_mode(&info->var, info, mode_option, NULL, 0, NULL, DEFAULT_BPP));
-
-	if (visfx_check_var(&info->var, info) == 0)
-		visfx_set_par(info);
+	fb_find_mode(&info->var, info, mode_option, NULL, 0, NULL, DEFAULT_BPP);
+	visfx_check_var(&info->var, info);
+	visfx_set_par(info);
 
 	ret = register_framebuffer(info);
 	if (ret)
