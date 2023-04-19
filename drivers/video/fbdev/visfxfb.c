@@ -110,6 +110,7 @@ static int visfx_wait_write_pipe_empty(struct fb_info *info)
 
 	for(i = 0; i < 1000000; i++) {
 		status = visfx_readl(info, UB_STATUS);
+		// this fails on FX-10
 		if (WARN_ON_ONCE(status & UB_STATUS_FAULT))
 			return -EIO;
 
@@ -376,7 +377,7 @@ static int visfx_wait_pll(struct fb_info *info)
 	}
 
 	if (status & (UB_STATUS_FAULT | UB_STATUS_WPNE)) {
-		dev_err(par->dev, "error %x\n", status);
+		dev_err(par->dev, "WPNE error %x\n", status);
 		return -EIO;
 	}
 
@@ -431,8 +432,10 @@ static int visfx_set_par(struct fb_info *info)
 	vbp = var->upper_margin - 1;
 
 	ret = visfx_set_pll(info, B2_PLL_DOT_CTL, var->pixclock);
-	if (ret)
+	if (ret) {
+		pr_warn("visfx_set_par: failed to set PLL\n");
 		return ret;
+	}
 
 	visfx_writel(info, B2_HTG, (hbp << 20) | (hsw << 12) | (0xc << 8) | hfp);
 	visfx_writel(info, B2_VTG, (vbp << 0) | (vsw << 8) | (vfp << 16));
@@ -835,9 +838,8 @@ static void visfx_setup(struct fb_info *info)
 	visfx_clear_buffer(info, 0x05000880, par->obmap0, 0x00fc0000, (var->bits_per_pixel == 32) ? 0xffffffff : 0);
 	visfx_clear_buffer(info, 0x05000880, par->abmap,  0x00900000, 0);
 
-	visfx_writel(info, B2_PMASK, 0xff);
 	visfx_writel(info, B2_FATTR, 0);
-	visfx_writel(info, B2_OTLS, (var->bits_per_pixel == 8) ? 0 : 0x10002);  // OTLS_Type -> auf 0 ?? statt OTR oder 1
+	visfx_writel(info, B2_OTLS, (var->bits_per_pixel == 8) ? 0 : 0x10002);  // OTLS_Type -> 20002 /3 ausprobieren!!! auf 0 ?? statt OTR oder 1 (OTR Seite 383)
 	visfx_writel(info, B2_CKEY_HI, 0xffffff);
 	visfx_writel(info, B2_CKEY_LO, 0xffffff);
 
@@ -916,6 +918,11 @@ static int __init visfx_initialize(struct fb_info *info)
 	struct visfx_par *par = info->par;
 	int i, ret;
 
+	pr_info("visfx: PLL: %08x:%08x, RAM: %08x:%08x, CB: %08x:%08x, GA: %08x:%08x\n",
+		par->defaults->pll_core_0, par->defaults->pll_core_1,
+		par->defaults->pll_ram_0, par->defaults->pll_ram_1,
+		par->defaults->pll_cb4038_0, par->defaults->pll_cb4038_1,
+		par->defaults->pll_ga_ipll_0, par->defaults->pll_ga_ipll_1);
 
 	visfx_bus_error_timer_enable(info, false);
 	ret = visfx_reset(info);
