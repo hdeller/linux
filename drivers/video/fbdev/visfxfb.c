@@ -4,12 +4,6 @@
  *
  * Copyright (c) 2021-2023 Sven Schnelle <svens@stackframe.org>
  * Copyright (c) 2022-2023 Helge Deller <deller@gmx.de>
- *
- *
- * insmod ~/visfxfb.ko mode_option=1366x768
- * Tools:
- * con2fbmap 1 1
- * fbset  -fb /dev/fb1 1280x1024-60 -depth 8
  */
 
 #include <linux/module.h>
@@ -269,8 +263,6 @@ static int visfx_setcolreg(unsigned regno, unsigned red, unsigned green,
 		r = (red >> 8) << 16;
 		g = (green >> 8) << 8;
 		b = (blue >> 8);
-		if (regno < 16)
-			((u32 *) info->pseudo_palette)[regno] = r | g | b;
 		set_clut:
 		visfx_writel(info, B2_LLCA, regno);
 		visfx_writel(info, B2_LUTD, r | g | b);
@@ -283,14 +275,15 @@ static int visfx_setcolreg(unsigned regno, unsigned red, unsigned green,
 			<< info->var.blue.offset;
 		g = (green >> (16 - info->var.green.length))
 			<< info->var.green.offset;
-		if (regno < 16)
-			((u32 *) info->pseudo_palette)[regno] = r | g | b;
 		if (info->fix.visual == FB_VISUAL_DIRECTCOLOR)
 			goto set_clut;
 		break;
 	default:
 		return -EINVAL;
 	}
+
+	if (regno < 16)
+		((u32 *) info->pseudo_palette)[regno] = r | g | b;
 
 	return 0;
 }
@@ -338,8 +331,6 @@ static void visfx_get_video_mode(struct fb_info *info)
 	tmp = visfx_readl(info, B2_VHAL);
 	var->xres = (tmp & 0xffff) + 1;
 	var->yres = (tmp >> 16) + 1;
-
-// printk("x %d  y %d\n", var->xres, var->yres);
 
 	tmp = visfx_readl(info, B2_PLL_DOT_CTL);
 	n = (tmp & 0xff) + 1;
@@ -759,30 +750,17 @@ static void visfx_setup(struct fb_info *info)
 	visfx_wait_write_pipe_empty(info);
 
 #ifdef __BIG_ENDIAN
-	// SEite 238
 	if (var->bits_per_pixel == 32) {
 		visfx_writel(info, B2_DMA_BSCFB, DSM_NO_BYTE_SWAP);
 		visfx_writel(info, B2_PDU_BSCFB, DSM_NO_BYTE_SWAP);
 	} else {
-		// 0 am Besten, zeigt aber 4 gleiche Pixel nebeneinander (wegen OTC04, aber OTC01 ist falsch bei 32bit zugriff)
-		// Seite 222
-		// DSM_NO_BYTE_SWAP (e4) -> console ist OK, aber pinguin farben falsch
-		// 0 -> console kaputt, aber pinguin richtig.
-		u32 val = DSM_NO_BYTE_SWAP;  // XXX
+		u32 val = DSM_NO_BYTE_SWAP;
 		visfx_writel(info, B2_DMA_BSCFB, val);
 		visfx_writel(info, B2_PDU_BSCFB, val);
 		visfx_writel(info, B2_FBC_RBS, DSM_NO_BYTE_SWAP);
 	}
 	visfx_writel(info, B2_MFU_BSCTD, DSM_NO_BYTE_SWAP);
 	visfx_writel(info, B2_MFU_BSCCTL, DSM_PDU_BYTE_SWAP_DEFAULT);
-#if 0
-#define DSM_NO_BYTE_SWAP                        0xe4e4e4e4  // Seite 238
-#define DSM_RGBA_TO_ARGB_BYTE_SWAP              0x39393939
-#define DSM_ARGB_TO_RGBA_BYTE_SWAP              0x93939393
-#define DSM_PDU_BYTE_SWAP_DEFAULT               0x1b1b1b1b
-#define DSM_HOST_IS_LITTLE_ENDIAN               0x01010101
-#define DSM_HOST_IS_BIG_ENDIAN                  0x00000000
-#endif
 #else
 	visfx_writel(info, B2_DMA_BSCFB, DSM_PDU_BYTE_SWAP_DEFAULT);
 	visfx_writel(info, B2_PDU_BSCFB, DSM_PDU_BYTE_SWAP_DEFAULT);
@@ -800,7 +778,7 @@ static void visfx_setup(struct fb_info *info)
 	visfx_writel(info, B2_WCE, 0);
 	visfx_writel(info, B2_CPE, 0);
 	visfx_writel(info, B2_ZBO, 0x00080000);
-	visfx_writel(info, B2_RTG_MEM_LOAD, 0xc9200); // bits 21:2 of host address XXX
+	visfx_writel(info, B2_RTG_MEM_LOAD, 0xc9200);
 	visfx_writel(info, B2_TM_TSS, 0);
 	visfx_writel(info, B2_FCDA, 0);
 	visfx_writel(info, B2_BMAP_Z, 0);
@@ -811,8 +789,7 @@ static void visfx_setup(struct fb_info *info)
 	visfx_writel(info, UP_CF_STATE, 0x02000000);
 	visfx_writel(info, B2_VBS, 1);
 
-	// ABMAP: 0x20200=ohne Overlay,
-	par->abmap  = var->xres / 4;	/* XXX: x-resolution divided by 4 */
+	par->abmap  = var->xres / 4;	/* x-resolution encoded in lower bits */
 	par->ibmap0 = 0x02681002;
 	par->bmap_z = 0x13090006;
 	par->obmap0 = 0x23a80000 | var->xres / 2;
@@ -845,7 +822,7 @@ static void visfx_setup(struct fb_info *info)
 	visfx_clear_buffer(info, 0x05000880, par->abmap,  0x00900000, 0);
 
 	visfx_writel(info, B2_FATTR, 0);
-	visfx_writel(info, B2_OTLS, (var->bits_per_pixel == 8) ? 0 : 0x10002);  // OTLS_Type -> 20002 /3 ausprobieren!!! auf 0 ?? statt OTR oder 1 (OTR Seite 383)
+	visfx_writel(info, B2_OTLS, (var->bits_per_pixel == 8) ? 0 : 0x10002);
 	visfx_writel(info, B2_CKEY_HI, 0xffffff);
 	visfx_writel(info, B2_CKEY_LO, 0xffffff);
 
@@ -898,25 +875,21 @@ static void visfx_setup(struct fb_info *info)
 		par->dba = B2_DBA_BIN8F | B2_DBA_OTC01 | B2_DBA_DIRECT | B2_DBA_D;
 		par->bmap_dba = par->ibmap0;
 		visfx_writel(info, B2_BPM, 0xffffffff);
-		visfx_writel(info, B2_OTR, 1<<16 | 1<<8 | 0); // ???  Seite 382, Overlay immer durchsichtig !!
+		visfx_writel(info, B2_OTR, 1<<16 | 1<<8 | 0);
 		visfx_writel(info, B2_FATTR, 0);
 	} else { /* 8-bit indexed: */
 		visfx_writel(info, B2_EN2D, B2_EN2D_BYTE_MODE);
-		par->dba = B2_DBA_BIN8I | B2_DBA_OTC04 | B2_DBA_DIRECT | B2_DBA_D;  // doch OCT01 oder OTC04 ???
+		par->dba = B2_DBA_BIN8I | B2_DBA_OTC04 | B2_DBA_DIRECT | B2_DBA_D;
 		par->bmap_dba = par->obmap0;
-		visfx_writel(info, B2_BPM, 0xff << 24);  // oder 0xff << 24
-		// visfx_writel(info, B2_OTR, 1<<16 | 3); // ???  Seite 382, 3=immer undurchsichtig !!
-		visfx_writel(info, B2_OTR, 2 ); // ???  Seite 382, 3=immer undurchsichtig !!
-		visfx_writel(info, B2_CFS16, 0x40); // mode=4, LUT=3 LUT auswählen
-		// visfx_writel(info, B2_CFS16, 0x0); // mode=4, LUT=3 LUT auswählen // Seite 396
-		// visfx_writel(info, B2_FATTR, 1<<7 | 1<<4); // -> CFS16  -> force Overlay!
-		// visfx_writel(info, B2_FATTR, 0);
-		visfx_writel(info, B2_FATTR, 1<<7 | 1<<4); // -> CFS16  -> force Overlay!
+		visfx_writel(info, B2_BPM, 0xff << 24);
+		visfx_writel(info, B2_OTR, 2);
+		visfx_writel(info, B2_CFS16, 0x40);
+		visfx_writel(info, B2_FATTR, 1<<7 | 1<<4); /* CFS16 & force Overlay */
 	}
 
-	visfx_writel(info, B2_BMAP_BABoth, par->bmap_dba);  // WOW !!!!!
+	visfx_writel(info, B2_BMAP_BABoth, par->bmap_dba);
 	visfx_writel(info, B2_BABoth, par->dba);
-	visfx_writel(info, B2_IPM, 0xffffffff); /* all bits/planes relevant, incl. A-mask */
+	visfx_writel(info, B2_IPM, 0xffffffff);
 }
 
 static int __init visfx_initialize(struct fb_info *info)
@@ -1034,8 +1007,6 @@ static int __init visfx_get_rom_defaults(struct fb_info *info)
 	par->defaults = par->reg_base + offset;
 	return 0;
 }
-
-/* setup */
 
 static void __init visfx_setup_info(struct pci_dev *pdev, struct fb_info *info)
 {
