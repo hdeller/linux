@@ -47,7 +47,7 @@
 #define MIN_XRES	640
 #define MIN_YRES	480
 
-#define DEFAULT_BPP	32 // 8 // 32
+#define DEFAULT_BPP	8
 
 static char *mode_option; /* empty means take video mode from ROM */
 
@@ -561,6 +561,7 @@ static int visfx_cursor(struct fb_info *info, struct fb_cursor *cursor)
 	if (cursor->set & FB_CUR_SETCMAP) {
 		color = visfx_cmap_entry(info, cursor->image.fg_color);
 		visfx_writel(info, UB_CB, color);
+		visfx_writel(info, UB_CF, 0);
 	}
 
 	if (cursor->enable) {
@@ -1101,8 +1102,6 @@ static int __init visfx_init_device(struct pci_dev *pdev, struct sti_struct *sti
 			info->var.xres, info->var.yres);
 		mode_option = mode;
 	}
-
-// printk("MODE OPTION %s\n", mode_option);
 
 	fb_find_mode(&info->var, info, mode_option, NULL, 0, NULL, DEFAULT_BPP);
 	visfx_check_var(&info->var, info);
