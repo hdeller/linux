@@ -14,11 +14,8 @@
 #include <linux/fb.h>
 #include <linux/delay.h>
 #include <linux/rational.h>
-
 #include <asm/grfioctl.h>
-
 #include "sticore.h"
-#include "visualizefx.h"
 
 #define VISFX_CARDTYPE_FX5	CRT_ID_LEGO
 
@@ -42,6 +39,757 @@
 #define MIN_YRES	480
 
 #define DEFAULT_BPP	8
+
+/* Visualize-FX hardware registers */
+#define UB_CP				  0x00400000 /* Cursor Position Register (W) */
+#define UB_CA				  0x00400004 /* Cursor Address Register (W) */
+#define UB_CD				  0x00400008 /* Cursor Data Register (W) */
+#define UB_CF				  0x0040000C /* Cursor Foreground Register (W) */
+#define UB_CB				  0x00400010 /* Cursor Background Register (W) */
+
+#define B2_BABoth			  0x00A00804 /* DBA & SBA (reads return DBA) (W) */
+#define B2_DBA				  0x00A00808 /* Destination Bitmap Access Register (W) */
+#define B2_SBA				  0x00A0080C /* Source Bitmap Access Register (W) */
+#define B2_DSA				  0x00A00810 /* Destination Screen Address Register (W) */
+#define B2_SSA				  0x00A00814 /* Source Screen Address Register (W) */
+#define B2_WORG				  0x00A00818 /* Window Origin Register (W) */
+#define B2_FBS				  0x00A0081C /* Front Buffer Select Register (W) */
+#define B2_BPDU				  0x00A00820 /* Bitmap Pixel Data Register (Upper Half) (W) */
+#define B2_BPD				  0x00A00824 /* Bitmap Pixel Data Register (W) */
+#define B2_BPMU				  0x00A00828 /* Bitmap Pixel Mask Register (Upper Half) (W) */
+#define B2_BPM				  0x00A0082C /* Bitmap Pixel Mask Register (W) */
+#define B2_BPCU				  0x00A00830 /* Bitmap Pixel Clip Register (Upper Half) (W) */
+#define B2_BPC				  0x00A00834 /* Bitmap Pixel Clip Register (W) */
+#define B2_IFCU				  0x00A00838 /* Image Foreground Color Register (Uppef Half) (W) */
+#define B2_IFC				  0x00A0083C /* Image Foreground Color Register (W) */
+#define B2_IBCU				  0x00A00840 /* Image Background Color Register (Upper Half) (W) */
+#define B2_IBC				  0x00A00844 /* Image Background Color Register (W) */
+#define B2_IPMU				  0x00A00848 /* Image Plane Mask Register (Upper Half) (W) */
+#define B2_IPM				  0x00A0084C /* Image Plane Mask Register (W) */
+#define B2_MISC_CTL			  0x00A00850 /* FBC Miscellaneous Control Register (W) */
+#define B2_FLN				  0x00A00854 /* Fill Length (in X) (W) */
+#define B2_EN2D				  0x00A00858 /* Coordinate Change Register (W) */
+#define B2_RPH				  0x00A0085C /* Read Prefetch Hint Register (W) */
+#define B2_WCEU				  0x00A00868 /* Window Clip Enable Register (Upper Half) (W) */
+#define B2_WCE				  0x00A0086C /* Window Clip Enable Register (W) */
+#define B2_PCRU				  0x00A00870 /* Pattern Control Register (Upper Half) (W) */
+#define B2_PCR				  0x00A00874 /* Pattern Control Register (W) */
+#define B2_BLN				  0x00A00880 /* BLT Length (in X) (W) */
+#define B2_SWEN				  0x00A00884 /* FBC Write Enable Register (W) */
+#define B2_SREN				  0x00A00888 /* FBC Read Enable Register (W) */
+#define B2_BMAP_BABoth			  0x00A008A0 /* Writes of Shared BMAP_DBA (W) */
+#define B2_BMAP_DBA			  0x00A008A4 /* Writes of Shared BMAP_DBA (W) */
+#define B2_BMAP_SBA			  0x00A008A8 /* Writes of Shared BMAP_SBA (W) */
+
+/*  Video Display Processor Registers  */
+#define B2_CP				  0x00800000 /* Cursor Position Register (RW) */
+#define B2_CA				  0x00800004 /* Cursor Address Register (RW) */
+#define B2_CD				  0x00800008 /* Cursor Data Register (RW) */
+#define B2_CF				  0x0080000C /* Cursor Foreground Register (RW) */
+#define B2_CB				  0x00800010 /* Cursor Background Register (RW) */
+#define B2_PMASK			  0x00800018 /* LUT Plane Mask Register (RW) */
+#define B2_MCS				  0x0080001C /* Midlay Color Map Select Register (RW) */
+#define B2_LLCA				  0x00800020 /* LUT Load Control Address Register (RW) */
+#define B2_LUTD				  0x00800024 /* Look Up Table Register (RW) */
+#define B2_FATTR			  0x0080003C /* Force Attribute Bits Register (RW) */
+#define B2_MV				  0x00800040 /* Misc. Video Register (RW) */
+#define B2_CFG				  0x00800044 /* Configuration Register (RW) */
+#define B2_SCR				  0x00800048 /* Stereo Control Register (RW) */
+#define B2_MPC				  0x0080004C /* Monitor Power Control Register (RW) */
+#define B2_ETG				  0x00800058 /* Early Timing Generator Register (RW) */
+#define B2_VHAL				  0x0080005C /* Vertical / Horizontal Active Length Register (RW) */
+#define B2_HTG				  0x00800060 /* Horizontal Timing Generator Register (RW) */
+#define B2_STG				  0x00800064 /* Serration Timing Generator Register (RW) */
+#define B2_VTG				  0x00800068 /* Vertical Timing Generator Register (RW) */
+#define B2_HS				  0x0080006C /* Horizontal State Register (RW) */
+#define B2_VS				  0x00800070 /* Vertical State Register (RW) */
+#define B2_DTS				  0x00800074 /* Timing & State Register (R) */
+#define B2_SRBMAP0			  0x00800078 /* Stereo Right Front Block BMAP Register (RW) */
+#define B2_SRBMAP1			  0x0080007C /* Stereo Right Back Block BMAP Register (RW) */
+#define B2_VOP				  0x00800080 /* Video Out Position Register (RW) */
+#define B2_VOS				  0x00800084 /* Video Out Size Register (RW) */
+#define B2_VOC				  0x00800088 /* Video Out Control Register (RW) */
+#define B2_VOP1				  0x0080008C /* Video Out Position Register (RW) */
+#define B2_STSA				  0x00800090 /* Showtime CRC Register (RW) */
+#define B2_BLSA				  0x00800094 /* Blither CRC Register (RW) */
+#define B2_PLL_DOT_CTL			  0x008000A0 /* Dot Clock PLL Control Register (RW) */
+#define B2_PLL_DOT_CNT			  0x008000A4 /* Dot Clock PLL Counter Register (RW) */
+#define B2_PLL_CORE_CTL			  0x008000A8 /* Core Clock PLL Control Register (RW) */
+#define B2_PLL_CORE_CNT			  0x008000AC /* Core Clock PLL Counter Register (RW) */
+#define B2_PLL_RAM_CTL			  0x008000B0 /* RAM Clock PLL Control Register (RW) */
+#define B2_PLL_RAM_CNT			  0x008000B4 /* RAM Clock PLL Counter Register (RW) */
+#define B2_PLL_REF_CNT			  0x008000B8 /* PLL Reference Clock Counter Register (RW) */
+#define B2_BLSA_MASK			  0x008000C4 /* BL Signature Analysis Mask Register (RW) */
+#define B2_SA_MASK			  0x008000C8 /* Signature Analysis Mask Register (RW) */
+#define B2_SA_SIG			  0x008000CC /* Signature Analysis Register (RW) */
+#define B2_MON				  0x008000D0 /* Monitor Test Register (RW) */
+#define B2_DDC				  0x008000D4 /* Display Data Channel Register (RW) */
+#define B2_CFS0				  0x00800100 /* Colormap Function Select Register 0 (RW) */
+#define B2_CFS16			  0x00800140 /* Colormap Function Select Register 16 (RW) */
+#define B2_VBC_SIG_EN			  0x008001C0 /* Vid Bus Signature Enable Register ? (RW) */
+#define B2_VBC_SIG			  0x008001C4 /* Vid Bus Signature Register? (RW) */
+#define B2_DUM				  0x00800240 /* Display Unit Master Register (RW) */
+#define B2_ABMAP			  0x00800244 /* Attribute Block BMAP Register (RW) */
+#define B2_CKEY_HI			  0x00800248 /* Color Key High Register (RW) */
+#define B2_CKEY_LO			  0x0080024C /* Color Key Low Register (RW) */
+#define B2_CALPHA			  0x00800250 /* Constant Alpha Register (RW) */
+#define B2_CCBC				  0x00800254 /* Color Conversion Brightness & Contrast Register (RW) */
+#define B2_OMC				  0x00800260 /* Overlay Miscellaneous Control Register (RW) */
+#define B2_OTLS				  0x00800264 /* Overlay Transparency LUT Select Register (RW) */
+#define B2_OXYO				  0x00800268 /* Overlay Visible XY Offset Register (RW) */
+#define B2_OBS				  0x0080026C /* Overlay Buffer Select Register (RW) */
+#define B2_OBMAP0			  0x00800270 /* Overlay Primary Buffer Block BMAP Register (RW) */
+#define B2_OBMAP1			  0x00800274 /* Overlay Secondary Buffer Block BMAP Register (RW) */
+#define B2_OUL				  0x00800278 /* Overlay Upper Left Register (RW) */
+#define B2_OLR				  0x0080027C /* Overlay  Lower Right Register (RW) */
+#define B2_ODS				  0x00800280 /* Overlay  Data Size Register (RW) */
+#define B2_OSCALE			  0x00800284 /* Overlay Scale Register (RW) */
+#define B2_IMD				  0x00800288 /* Image Depth Register (RW) */
+#define B2_IMC0				  0x00800300 /* Image Miscellaneous Control 0 Register (RW) */
+#define B2_IMC1				  0x00800304 /* Image Miscellaneous Control 1 Register (RW) */
+#define B2_IMC2				  0x00800308 /* Image Miscellaneous Control 2 Register (RW) */
+#define B2_IMC3				  0x0080030C /* Image Miscellaneous Control 3 Register (RW) */
+#define B2_IMC4				  0x00800310 /* Image Miscellaneous Control 4 Register (RW) */
+#define B2_IMC5				  0x00800314 /* Image Miscellaneous Control 5 Register (RW) */
+#define B2_IMC6				  0x00800318 /* Image Miscellaneous Control 6 Register (RW) */
+#define B2_IMC7				  0x0080031C /* Image Miscellaneous Control 7 Register (RW) */
+#define B2_IBMAP0			  0x00800320 /* Image Primary BMAP Register (RW) */
+#define B2_IBMAP1			  0x00800324 /* Image Secondary BMAP Register (RW) */
+#define B2_WAIT_HSYNC			  0x00800330 /* Wait for Horizontal retrace sync Register (RW) */
+#define B2_IBS0				  0x00800340 /* Image Buffer Select 0 Register (RW) */
+#define B2_IBS1				  0x00800344 /* Image Buffer Select 1 Register (RW) */
+#define B2_IBS2				  0x00800348 /* Image Buffer Select 2 Register (RW) */
+#define B2_IBS3				  0x0080034C /* Image Buffer Select 3 Register (RW) */
+#define B2_IBS4				  0x00800350 /* Image Buffer Select 4 Register (RW) */
+#define B2_IBS5				  0x00800354 /* Image Buffer Select 5 Register (RW) */
+#define B2_IBS6				  0x00800358 /* Image Buffer Select 6 Register (RW) */
+#define B2_IBS7				  0x0080035C /* Image Buffer Select 7 Register (RW) */
+#define B2_ICLR0			  0x00800360 /* Image Clear 0 Register (RW) */
+#define B2_ICLR1			  0x00800364 /* Image Clear 1 Register (RW) */
+#define B2_ICLR2			  0x00800368 /* Image Clear 2 Register (RW) */
+#define B2_ICLR3			  0x0080036C /* Image Clear 3 Register (RW) */
+#define B2_ICLR4			  0x00800370 /* Image Clear 4 Register (RW) */
+#define B2_ICLR5			  0x00800374 /* Image Clear 5 Register (RW) */
+#define B2_ICLR6			  0x00800378 /* Image Clear 6 Register (RW) */
+#define B2_ICLR7			  0x0080037C /* Image Clear 7 Register (RW) */
+
+#define B2_FOE				  0x00A00404 /* Fragment Operation Enable Register (W) */
+#define B2_VTB				  0x00B08008 /* MFU Vector Tie Breaker Register (RW) */
+#define B2_TTB				  0x00B0800C /* MFU Trapezoid Tie Breaker Register (RW) */
+#define B2_TM_TSS			  0x008E5800 /* Texture Subsystem Setup (all registers) (RW) */
+
+/*  FBC Registers  */
+#define UB_IBO				  0x00521110 /* Image Bitmap Operation Register (R) */
+#define UB_CPE				  0x00521114 /* Clip Plane Enable Register (R) */
+#define UB_CZ				  0x00521118 /* Constant Z data Register  (R) */
+#define UB_CBR				  0x0052111C /* Constant Blend Register (R) */
+#define UB_ZBO				  0x00521120 /* Z Bitmap Operation Register (R) */
+#define UB_SBO				  0x00521124 /* Stencil Bitmap Operation Register (R) */
+#define UB_ATO				  0x00521128 /* Alpha Test Operation Register (R) */
+#define UB_DOXY				  0x0052112C /* Dither Offset  XY Register (R) */
+#define UB_FOG				  0x00521134 /* Fog Color Register (R) */
+#define UB_FZ				  0x00521138 /* Fast  Z Clear Register (R) */
+#define UB_BMAP_Z			  0x0052113C /* BMAP Z Register (R) */
+#define UB_TEC0				  0x00521140 /* Texture Environment Color  0 Register (R) */
+#define UB_TEC1				  0x00521144 /* Texture Environment Color 1 Register (R) */
+#define UB_TEX_2D			  0x00521154 /* Texture 2D Register (R) */
+#define UB_FOG_2D			  0x00521160 /* Fog 2D Register (R) */
+#define UB_SCK_UR			  0x00521170 /* Source Color Key Upper Range Register (R) */
+#define UB_SCK_LR			  0x00521174 /* Source Color Key Lower Range Register (R) */
+#define UB_CKC				  0x00521178 /* Color Key Configuration Register (R) */
+#define UB_VTR				  0x00521180 /* Visibility Test Statistics Results (R) */
+#define UB_VTE				  0x00521184 /* Visibility Test Enable (R) */
+#define UB_VPCNT			  0x0052118c /* Visibility Count Pass Register (R) */
+#define UB_VFCNT			  0x00521190 /* Visibility Count Fail Register (R) */
+#define UB_MBWB				  0x00521194 /* Multi-buffer Write Buffer B (R) */
+#define UB_MBWC				  0x00521198 /* Multi-buffer Write Buffer C (R) */
+#define UB_MBWD				  0x0052119c /* Multi-buffer Write Buffer D (R) */
+#define UB_FCDA				  0x005211a4 /* Fast Cleat Default Alpha Register (R) */
+#define UB_BTO				  0x005211a8 /* Pixel Batching Timeout Value (R) */
+#define UB_RC_CONFIG0			  0x005211b0 /* Ram controller timing configuration register 0 (R) */
+#define UB_RC_CONFIG1			  0x005211b4 /* Ram controller timing configuration register 1 (R) */
+#define UB_RC_CONFIG2			  0x005211b8 /* Ram controller timing configuration register 2 (R) */
+#define UB_FPR				  0x00522008 /* FBC Parameters Register (R) */
+
+/*  Shadowed FBC Registers(sent to all FBC blocks)  */
+#define B2_FBC_BABoth			  0x00920804 /* DBA & SBA (reads return DBA) (RW) */
+#define B2_FBC_DBA			  0x00920808 /* Destination Bitmap Access Register (RW) */
+#define B2_FBC_SBA			  0x0092080C /* Source Bitmap Access Register (RW) */
+#define B2_FBC_DSA			  0x00920810 /* Destination Screen Address Register (RW) */
+#define B2_FBC_SSA			  0x00920814 /* Source Screen Address Register (RW) */
+#define B2_FBC_WORG			  0x00920818 /* FBC Window Origin (W) */
+#define B2_FBC_FBS			  0x0092081C /* Front Buffer Select Register (RW) */
+#define B2_FBC_BPDU			  0x00920820 /* Bitmap Pixel Data Register (Upper Half) (RW) */
+#define B2_FBC_BPD			  0x00920824 /* Bitmap Pixel Data Register (RW) */
+#define B2_FBC_BPMU			  0x00920828 /* Bitmap Pixel Mask Register (Upper Half) (RW) */
+#define B2_FBC_BPM			  0x0092082C /* Bitmap Pixel Mask Register (RW) */
+#define B2_FBC_BPCU			  0x00920830 /* Bitmap Pixel Clip Register (Upper Half) (RW) */
+#define B2_FBC_BPC			  0x00920834 /* Bitmap Pixel Clip Register (RW) */
+#define B2_FBC_IFCU			  0x00920838 /* Image Foreground Color Register (Upper Half) (RW) */
+#define B2_FBC_IFC			  0x0092083C /* Image Foreground Color Register (RW) */
+#define B2_FBC_IBCU			  0x00920840 /* Image Background Color Register (Upper Half) (RW) */
+#define B2_FBC_IBC			  0x00920844 /* Image Background Color Register (RW) */
+#define B2_FBC_IPMU			  0x00920848 /* Image Plane Mask Register (Upper Half) (RW) */
+#define B2_FBC_IPM			  0x0092084C /* Image Plane Mask Register (RW) */
+#define B2_FBC_MISC_CTL			  0x00920850 /* Miscellaneous Control Register (RW) */
+#define B2_FBC_FLN			  0x00920854 /* Fill Length (in X) (RW) */
+#define B2_FBC_RPH			  0x0092085C /* Read Prefetch Hint Register (R) */
+#define B2_FBC_RBS			  0x00920860 /* Read Byte Swap Register (RW) */
+#define B2_FBC_WCEU			  0x00920868 /* Window Clip Enable Register (Upper Half) (RW) */
+#define B2_FBC_WCE			  0x0092086C /* Window Clip Enable Register (RW) */
+#define B2_FBC_PCRU			  0x00920870 /* Pattern Control Register (Upper Half) (RW) */
+#define B2_FBC_PCR			  0x00920874 /* Pattern Control Register (RW) */
+#define B2_FBC_BLN			  0x00920880 /* BLT Length (in X) (RW) */
+#define B2_FBC_WEN			  0x00920884 /* FBC Write Enable Register (RW) */
+#define B2_FBC_REN			  0x00920888 /* FBC Read Enable Register (RW) */
+#define B2_RTSTATUS			  0x00920890 /* RT Status Register (R) */
+#define B2_FBC_BMAP_BABoth		  0x009208A0 /* BMAP DBA and SBA (reads return BMAP_DBA) (RW) */
+#define B2_FBC_BMAP_DBA			  0x009208A4 /* BMAP Destination Bitmap Access register (RW) */
+#define B2_FBC_BMAP_SBA			  0x009208AC /* BMAP Source Bitmap Access register (RW) */
+#define B2_FBC_WUL0			  0x00920900 /* Window Clip Upper Left 0 (RW) */
+#define B2_FBC_WLR0			  0x00920904 /* Window Clip Lower Right 0 (RW) */
+
+#define B2_AMAP0			  0x00920A00 /* Direct Frame Buffer Address Mapping  (RW) */
+#define B2_AMAP1			  0x00920A04 /* Direct Frame Buffer Address Mapping  (RW) */
+#define B2_AMAP2			  0x00920A08 /* Direct Frame Buffer Address Mapping  (RW) */
+#define B2_AMAP3			  0x00920A0C /* Direct Frame Buffer Address Mapping  (RW) */
+#define B2_AMAP4			  0x00920A10 /* Direct Frame Buffer Address Mapping  (RW) */
+#define B2_AMAP5			  0x00920A14 /* Direct Frame Buffer Address Mapping  (RW) */
+#define B2_AMAP6			  0x00920A18 /* Direct Frame Buffer Address Mapping  (RW) */
+#define B2_AMAP7			  0x00920A1C /* Direct Frame Buffer Address Mapping  (RW) */
+#define B2_AMAP8			  0x00920A20 /* Direct Frame Buffer Address Mapping  (RW) */
+#define B2_AMAP9			  0x00920A24 /* Direct Frame Buffer Address Mapping  (RW) */
+#define B2_AMAP10			  0x00920A28 /* Direct Frame Buffer Address Mapping  (RW) */
+#define B2_AMAP11			  0x00920A2C /* Direct Frame Buffer Address Mapping  (RW) */
+#define B2_AMAP12			  0x00920A30 /* Direct Frame Buffer Address Mapping  (RW) */
+#define B2_AMAP13			  0x00920A34 /* Direct Frame Buffer Address Mapping  (RW) */
+#define B2_AMAP14			  0x00920A38 /* Direct Frame Buffer Address Mapping  (RW) */
+#define B2_AMAP15			  0x00920A3C /* Direct Frame Buffer Address Mapping  (RW) */
+#define B2_AMAP_BA_U			  0x00920AF0 /* Direct Frame Buffer YUV420 U Address Mapping  (RW) */
+#define B2_AMAP_BA_V			  0x00920AF4 /* Direct Frame Buffer YUV420 V Address Mapping  (RW) */
+
+#define B2_BMAP_DFB0			  0x00920B00 /* Direct Frame Buffer Access BMAP registers (RW) */
+#define B2_BMAP_DFB1			  0x00920B04 /* Direct Frame Buffer Access BMAP registers (RW) */
+#define B2_BMAP_DFB2			  0x00920B08 /* Direct Frame Buffer Access BMAP registers (RW) */
+#define B2_BMAP_DFB3			  0x00920B0C /* Direct Frame Buffer Access BMAP registers (RW) */
+#define B2_BMAP_DFB4			  0x00920B10 /* Direct Frame Buffer Access BMAP registers (RW) */
+#define B2_BMAP_DFB5			  0x00920B14 /* Direct Frame Buffer Access BMAP registers (RW) */
+#define B2_BMAP_DFB6			  0x00920B18 /* Direct Frame Buffer Access BMAP registers (RW) */
+#define B2_BMAP_DFB7			  0x00920B1C /* Direct Frame Buffer Access BMAP registers (RW) */
+#define B2_BMAP_DFB8			  0x00920B20 /* Direct Frame Buffer Access BMAP registers (RW) */
+#define B2_BMAP_DFB9			  0x00920B24 /* Direct Frame Buffer Access BMAP registers (RW) */
+#define B2_BMAP_DFB10			  0x00920B28 /* Direct Frame Buffer Access BMAP registers (RW) */
+#define B2_BMAP_DFB11			  0x00920B2C /* Direct Frame Buffer Access BMAP registers (RW) */
+#define B2_BMAP_DFB12			  0x00920B30 /* Direct Frame Buffer Access BMAP registers (RW) */
+#define B2_BMAP_DFB13			  0x00920B34 /* Direct Frame Buffer Access BMAP registers (RW) */
+#define B2_BMAP_DFB14			  0x00920B38 /* Direct Frame Buffer Access BMAP registers (RW) */
+#define B2_BMAP_DFB15			  0x00920B3C /* Direct Frame Buffer Access BMAP registers (RW) */
+
+/*  Misc FBC Non-Shadowed registers  */
+#define B2_FZ				  0x00921108 /* Fast Z Clear Register (RW) */
+#define B2_IBO				  0x00921110 /* Image Bitmap Operation Register (RW) */
+#define B2_CPE				  0x00921114 /* Clip Plane Enable Register (RW) */
+#define B2_CZ				  0x00921118 /* Constant Z data Register  (RW) */
+#define B2_CBR				  0x0092111C /* Constant Blend Register (RW) */
+#define B2_ZBO				  0x00921120 /* Z Bitmap Operation Register (RW) */
+#define B2_SBO				  0x00921124 /* Stencil Bitmap Operation Register (RW) */
+#define B2_ATO				  0x00921128 /* Alpha Test Operation Register (RW) */
+#define B2_DOXY				  0x0092112C /* Dither Offset XY Register (RW) */
+#define B2_FOGU				  0x00921130 /* Fog Color Register (Upper Half) (RW) */
+#define B2_FOG				  0x00921134 /* Fog Color Register (RW) */
+#define B2_BMAP_Z			  0x0092113C /* BMAP Z register (RW) */
+#define B2_TEC0				  0x00921140 /* Texture Environment Color  0 Register (RW) */
+#define B2_TEC1				  0x00921144 /* Texture Environment Color 1 Register (RW) */
+#define B2_OTR				  0x00921148 /* Overlay Transparency Register (RW) */
+#define B2_TEX_2DU			  0x00921150 /* Texture 2D Register (Upper Half) (RW) */
+#define B2_TEX_2D			  0x00921154 /* Texture 2D Register (RW) */
+#define B2_FOG_2D			  0x00921160 /* Fog 2D Register (RW) */
+#define B2_SCK_UR			  0x00921170 /* Source Color Key Upper Range Register (RW) */
+#define B2_SCK_LR			  0x00921174 /* Source Color Key Lower Range Register (RW) */
+#define B2_CKC				  0x00921178 /* Color Key Configuration Register (RW) */
+#define B2_VTR				  0x00921180 /* Visibility Test Statistics Results (RW) */
+#define B2_VTE				  0x00921184 /* Visibility Test Enable (RW) */
+#define B2_VTC				  0x00921188 /* Visibility Test Clear (W) */
+#define B2_VPCNT			  0x0092118c /* Visibility Count Pass Register (RW) */
+#define B2_VFCNT			  0x00921190 /* Visibility Count Fail Register (RW) */
+#define B2_MBWB				  0x00921194 /* Multi-buffer Write Buffer B (RW) */
+#define B2_MBWC				  0x00921198 /* Multi-buffer Write Buffer C (RW) */
+#define B2_MBWD				  0x0092119c /* Multi-buffer Write Buffer D (RW) */
+#define B2_FSR				  0x009211C4 /* Fast Surface Clear Pixel Read Register (RW) */
+#define B2_FSRMWA			  0x009211C8 /* Fast Surface Clear Register RMW buffer A (RW) */
+#define B2_FSRMWB			  0x009211CC /* Fast Surface Clear Register RMW buffer B (RW) */
+#define B2_FSRMWC			  0x009211D0 /* Fast Surface Clear Register RMW buffer C (RW) */
+#define B2_FSRMWD			  0x009211D4 /* Fast Surface Clear Register RMW buffer D (RW) */
+#define B2_FCDA				  0x009211D8 /* Fast Clear Default Alpha Register (RW) */
+#define B2_BTO				  0x009211DC /* Pixel Batching Timeout Value (RW) */
+#define B2_BIST				  0x009211e8 /* Built-in Self Test register (RW) */
+#define B2_RC_CONFIG0			  0x009211f0 /* Ram controller timing configuration register 0 (RW) */
+#define B2_RC_CONFIG1			  0x009211f4 /* Ram controller timing configuration register 1 (RW) */
+#define B2_RC_CONFIG2			  0x009211f8 /* Ram controller timing configuration register 2 (RW) */
+
+#define B2_FPR				  0x00922008 /* FBC Parameters Register (R) */
+#define B2_FBC_PERF			  0x0092200C /* FBC Performance Register (RW) */
+#define B2_FCR				  0x00922010 /* FBC CRC Read Register (R) */
+#define B2_FCI				  0x00922014 /* FBC CRC Initiate Register (W) */
+#define B2_FCM				  0x00922018 /* FBC CRC Mask Register (W) */
+#define B2_FBC_STATUS			  0x0092201C /* FBC Status Register (W) */
+
+/*  FBC Tile Builder Specific Registers  */
+#define B2_TB_BMAP_BABoth		  0x0092A000 /* Reads of TB's copy of Shared BMAP_DBA (R) */
+#define B2_TB_BMAP_DBA			  0x0092A004 /* Reads of TB's copy of Shared BMAP_DBA (R) */
+#define B2_TB_BMAP_SBA			  0x0092A008 /* Reads of TB's copy of Shared BMAP_SBA (R) */
+#define B2_FBC_TB_REN			  0x0092A00C /* FBC/TB read address for FBC_SREN (R) */
+#define B2_FBC_TB_DBA			  0x0092A010 /* FBC/TB read address for DBA (R) */
+#define B2_FBC_TB_SBA			  0x0092A014 /* FBC/TB read address for SBA (R) */
+#define B2_FBC_TB_WEN			  0x0092A018 /* FBC/TB read address for FBC_SWEN (R) */
+
+/* 2D Retargeted Registers  */
+#define B2_RTG_MEM_USE			  0x009C2000 /* Start Of Retargetter Memory (For Normal Use) (RW) */
+#define B2_RTG_MEM_LOAD			  0x009C3000 /* Start Of Retargetter Memory (For Loading Memory) (RW) */
+
+#define UB_UBABoth			  0x00600C04 /* UDBA & USBA (W) */
+#define UB_UDBA				  0x00600C08 /* Unbuffered Destination Bitmap Access Register (W) */
+#define UB_USBA				  0x00600C0C /* Unbuffered Source Bitmap Access Register (W) */
+#define UB_UDSA				  0x00600C10 /* Unbuffered Destination Screen Address Register (W) */
+#define UB_USSA				  0x00600C14 /* Unbuffered Source Screen Address Register (W) */
+#define UB_UBPDU			  0x00600C20 /* Unbuffered Bitmap Pixel Data Register (Upper Half) (W) */
+#define UB_UBPD				  0x00600C24 /* Unbuffered Bitmap Pixel Data Register (W) */
+#define UB_UBPMU			  0x00600C28 /* Unbuffered Bitmap Pixel Mask Register (Upper Half) (W) */
+#define UB_UBPM				  0x00600C2C /* Unbuffered Bitmap Pixel Mask Register (W) */
+#define UB_UBPCU			  0x00600C30 /* Unbuffered Bitmap Pixel Clip Register (Upper Half) (W) */
+#define UB_UBPC				  0x00600C34 /* Unbuffered Bitmap Pixel Clip Register (W) */
+#define UB_URPH				  0x00600C5C /* Unbuffered Read Prefetch Hint Register (W) */
+#define UB_UREN				  0x00600C8C /* Unbuffered Read Enable Register (W) */
+
+/* Host Interface Registers  */
+#define UP_CONTROL			  0x00249000 /* Control Register (RW) */
+#define UP_FC				  0x00249040 /* Fault Control Register (RW) */
+#define UP_TCP				  0x00249080 /* Time-out Circuit Parameter (RW) */
+#define UP_DC				  0x002490C0 /* Dribble Count Register (RW) */
+#define UP_STI_COUNT			  0x00249140 /* STI Count Register (RW) */
+#define UP_PSTI_SCRATCH1		  0x00249180 /* Privileged STI Scratch Register 1 (RW) */
+#define UP_PSTI_SCRATCH2		  0x002491A0 /* Privileged STI Scratch Register 2 (RW) */
+#define UP_PSTI_SCRATCH3		  0x002491C0 /* Privileged STI Scratch Register 3 (RW) */
+#define UP_PSTI_SCRATCH4		  0x002491E0 /* Privileged STI Scratch Register 4 (RW) */
+#define UP_INT_ADDR			  0x00249200 /* Interrupt Address Register (RW) */
+#define UP_INT_DATA			  0x00249240 /* Interrupt Data Register (RW) */
+#define UP_STI_ADDR			  0x00249280 /* STI Write Address Register (W) */
+#define UP_STI_DATA			  0x002492C0 /* STI Write Data Register (W) */
+#define UP_VBS_CTL			  0x00249300 /* VBS Control Register (-) */
+
+#define UP_CD_STATE1			  0x0024B000 /* CD Buffer State Register One (RW) */
+#define UP_CD_STATE2			  0x0024B004 /* CD Buffer State Register Two (RW) */
+#define UP_CD_DATA			  0x0024B008 /* CD Buffer Data Register (RW) */
+#define UP_CF_STATE			  0x0024B00C /* Command Fifo State Register (RW) */
+#define UP_CF_DATA			  0x0024B010 /* Command Fifo Data Register (RW) */
+#define UP_CD_HWC			  0x0024B014 /* CD Buffer High Water Count Register (R) */
+#define UP_CD_LWC			  0x0024B018 /* CD Buffer Low Water Count Register (R) */
+#define UP_CF_HWC			  0x0024B01C /* Command Fifo High Water Count Register (R) */
+#define UP_CF_LWC			  0x0024B020 /* Command Fifo Low Water Count Register (R) */
+#define UP_CD_DRC			  0x0024B024 /* CD Buffer Dribble Count Register (R) */
+#define UP_CF_DRC			  0x0024B028 /* Command FIFO Dribble Count Register (R) */
+
+/* Host Interface Registers  */
+#define BP_CONTROL			  0x002C9000 /* Control Register (RW) */
+#define BP_FC				  0x002C9040 /* Fault Control Register (RW) */
+#define BP_CD_HWC			  0x002CB014 /* CD Buffer High Water Count Register (RW) */
+#define BP_CD_LWC			  0x002CB018 /* CD Buffer Low Water Count Register (RW) */
+#define BP_CF_HWC			  0x002CB01C /* Command Fifo High Water Count Register (RW) */
+#define BP_CF_LWC			  0x002CB020 /* Command Fifo Low Water Count Register (RW) */
+#define BP_CD_DRC			  0x002CB024 /* CD Buffer Dribble Count Register (RW) */
+#define BP_CF_DRC			  0x002CB028 /* Command FIFO Dribble Count Register (RW) */
+#define BP_ICR				  0x002CB800 /* Integrator Counter Register (RW) */
+
+/* Host Interface Registers  */
+#define UB_CONTROL			  0x00641000 /* Control Register (RW) */
+#define UB_FC				  0x00641040 /* Fault Control Register (R) */
+#define UB_TCP				  0x00641080 /* Time-out Circuit Parameter Register (R) */
+#define UB_DC				  0x006410C0 /* Dribble Count Register (R) */
+#define UB_AGP_FFC			  0x00641100 /* AGP DMA Queue State (R) */
+#define UB_STI_COUNT			  0x00641140 /* STI Count Register (R) */
+#define UB_PSTI_SCRATCH1		  0x00641180 /* Privileged STI Scratch Register 1 (R) */
+#define UB_PSTI_SCRATCH2		  0x006411A0 /* Privileged STI Scratch Register 2 (R) */
+#define UB_PSTI_SCRATCH3		  0x006411C0 /* Privileged STI Scratch Register 3 (R) */
+#define UB_PSTI_SCRATCH4		  0x006411E0 /* Privileged STI Scratch Register 4 (R) */
+#define UB_INT_ADDR			  0x00641200 /* Interrupt Address Register (R) */
+#define UB_INT_DATA			  0x00641240 /* Interrupt Data Register (R) */
+#define UB_STATUS			  0x00641400 /* Status Register (R) */
+#define UB_FFC				  0x00641440 /* Fifo Free Count Register (R) */
+#define UB_UREAD_DATA			  0x006414C0 /* Unbuffered Read Data Register (R) */
+
+#define UB_UIRP				  0x00641540 /* Unbuffered Indirect Read Purge Register (W) */
+
+#define UB_CLIP_PLANE_STAMP		  0x00641580 /* STI Scratch 1/Clip Plane Stamp (RW) */
+#define UB_STI_SCRATCH1			  0x00641580 /* STI Scratch Register 1 (RW) */
+#define UB_STI_SCRATCH2			  0x006415A0 /* STI Scratch Register 2 (RW) */
+#define UB_STI_SCRATCH3			  0x006415C0 /* STI Scratch Register 3 (RW) */
+#define UB_STI_SCRATCH4			  0x006415E0 /* STI Scratch Register 4 (RW) */
+#define UB_SIG_LOWER_LSB		  0x00641700 /* Lower Write Data Signature LSB's (RW) */
+#define UB_SIG_LOWER_MSB		  0x00641740 /* Lower Write Data Signature MSB's (RW) */
+#define UB_SIG_UPPER_LSB		  0x00641780 /* Upper Write Data Signature LSB's (RW) */
+#define UB_SIG_UPPER_MSB		  0x006417C0 /* Upper Write Data Signature MSB's (RW) */
+#define UB_TRI_STATUS			  0x00641800 /* Triaqua-specific Status Register (R) */
+#define UB_INT_PENDING			  0x00641840 /* Interrupt Pending Register (Diagnostics) (R) */
+#define UB_DREAD_ADDR			  0x00641880 /* Direct Read Address Register (Diagnostics) (R) */
+#define UB_VREAD_ADDR			  0x006418C0 /* ROM Read Address Register (Diagnostics) (R) */
+#define UB_AGP_UDSA			  0x006499C0 /* TM AGP DMA UDSA (-) */
+#define UB_AGP_UDMA_UPPER		  0x00649A00 /* TM Reader Address (-) */
+#define UB_AGP_UDMA_LOWER		  0x00649A40 /* TM Reader Address (-) */
+#define UB_AGP_UDMA_OTC_STRIDE		  0x00649A80 /* AGP DMA Stride (-) */
+#define UB_AGP_UDMA_HIGH_WIDE		  0x00649AC0 /* TM AGP DMA Read Hint (-) */
+#define UB_AGP_DIAG0			  0x00649B00 /* TBD (-) */
+#define UB_AGP_DIAG1			  0x00649B40 /* TBD (-) */
+#define UB_AGP_DIAG2			  0x00649B80 /* TBD (-) */
+#define UB_AGP_DIAG3			  0x00649BC0 /* TBD (-) */
+#define UB_DEVID			  0x00641C00 /* PCI Device ID Register (R) */
+#define UB_COM_STAT			  0x00641C04 /* PCI Command And Status Register (R) */
+#define UB_REVID			  0x00641C08 /* PCI Revision ID Register (R) */
+#define UB_LT				  0x00641C0C /* PCI Latency Timer Register (R) */
+#define UB_MBA_LOWER			  0x00641C10 /* PCI Memory Base Address Register [31:0] (R) */
+#define UB_MBA_UPPER			  0x00641C14 /* PCI Memory Base Address Register [63:32] (R) */
+#define UB_FBMBA_LOWER			  0x00641C18 /* Direct FB Access (R) */
+#define UB_FBMBA_UPPER			  0x00641C1C /* Direct FB Access (R) */
+#define UB_SUBID			  0x00641C2C /* Subvendor ID (R) */
+#define UB_RBA				  0x00641C30 /* PCI Expansion ROM Base Address Register (R) */
+#define UB_AGP_CAPPTR			  0x00641C34 /* PCI New Capability (R) */
+#define UB_LAT_GNT			  0x00641C3C /* PCI Minimum Grant And Maximum Latency Register (R) */
+#define UB_AGP_CAPID			  0x00641C40 /* AGP Capabilities ID (R) */
+#define UB_AGP_STATUS			  0x00641C44 /* AGP Capabilities List (R) */
+#define UB_AGP_CMD			  0x00641C48 /* AGP Capabilities Enables (R) */
+#define UB_PWR_CAPID			  0x00641C4C /* Power Management (R) */
+#define UB__PWR_CMD			  0x00641C50 /* Power Management (R) */
+
+#define UB_IRC				  0x00643030 /* Buffered Indirect Read Control Register (R) */
+#define UB_UIRC				  0x00643034 /* Unbuffered Indirect Read Control Register (RW) */
+#define UB_CD_BUFFER_CTL		  0x00643038 /* CD Buffer Control Register (R) */
+#define UB_PDU_UBSCFB			  0x0064303C /* PDU Unbuffered Byte Swap Ctl Reg (frame buffer space) (RW) */
+#define UB_PQC				  0x00643040 /* Packet Queue Control Register (R) */
+#define UB_PQD				  0x00643100 /* Start Packet Queue Data Register (R) */
+
+#define B2_IRC				  0x00A43030 /* Buffered Indirect Read Control Register (RW) */
+
+#define B2_CD_BUFFER_CTL		  0x00A43038 /* CD Buffer Control Register (RW) */
+#define B2_PDU_BSCFB			  0x00A4303C /* PDU Buffered Byte Swap Control Register (frame buffer space) (RW) */
+#define B2_PQC				  0x00A43040 /* Packet Queue Control Register (RW) */
+#define B2_PQD				  0x00A43100 /* Start Packet Queue Data Register (RW) */
+
+/* Host Interface Address Space  */
+#define B3_CONTROL			  0x00E41000 /* Control Register (RW) */
+#define B3_FC				  0x00E41040 /* Fault Control Register (R) */
+#define B3_STATUS			  0x00E41400 /* Status Register (R) */
+#define B3_FFC				  0x00E41440 /* Fifo Free Count Register (R) */
+#define B3_READ_DATA			  0x00E41480 /* Buffered Read Data Register (R) */
+#define B3_IRP				  0x00E41500 /* Buffered Indirect Read Purge Register (W) */
+
+#define B3_BBC_CONFIG			  0x00EE231C /* Blitzen Bus Controller Config Register (RW) */
+#define B3_HUNGRY			  0x00EE2350 /* Hungry Bits From GA's Register (R) */
+#define B3_NUM_GA			  0x00EE233C /* Number Of Geometry Accelerators Register (RW) */
+#define B3_GA_CONFIG			  0x00CB0038 /* Geometry Accelerator Configuration Register (RW) */
+#define B3_GA_NOP_EOC			  0x00CA8000 /* Not Really Used This Way (RW) */
+#define B3_GA_IPLL			  0x00CB4030 /* Geometry Accelerator I/O PLL Control Register (RW) */
+
+/* Summit Binc Interface  */
+#define UB_BTDstObj_Xi			  0x00660000 /*Address For Direct Binc - dst / src obj inc X (RW) */
+#define UB_BTDstObj_Xd			  0x00664000 /*Address For Direct Binc - dst / src obj dec X (W) */
+#define B2_BTDstObj_Xi			  0x00A60000 /* Start For Direct Binc - dst / src obj inc X (RW) */
+#define B2_BTDstObj_Xd			  0x00A64000 /* Start For Direct Binc - dst / src obj dec X (W) */
+#define B2_BTDstObj_Yi			  0x00A68000 /* Start For Direct Binc - dst / src obj inc Y (W) */
+#define B2_BTDstObj_Yd			  0x00A6C000 /* Start For Direct Binc - dst / src obj dec Y (W) */
+#define B2_BTDstObj_Xi_Yi		  0x00A70000 /* Start For Direct Binc - dst / src obj inc X inc Y  (RW) */
+#define B2_BTDstObj_Xi_Yd		  0x00A74000 /* Start For Direct Binc - dst / src obj inc X, dec Y (W) */
+#define B2_BTDstObj_Xd_Yi		  0x00A78000 /*For Direct Binc - dst / src obj dec X, inc Y (W) */
+#define B2_BTDstObj_Xd_Yd		  0x00A7C000 /* Start For Direct Binc - dst / src obj dec X, dec Y (W) */
+
+#define UB_DMA_OFFSET			  0x006A007C /* Buffered DMA Offset Register (For Diag Only) (R) */
+#define UB_DMA_BSCBLK_RO		  0x006A0404 /* Buff. Data Blanket Byte Swap Ctl Read Reg (For Diag) (R) */
+#define UB_DMA_DIAG_AFLAG		  0x006A0418 /* DMA Controller Address Flags (Diagnostic) (R) */
+#define UB_DMA_DIAG_ADDR		  0x006A041C /* DMA Controller Address (Diagnostic) (R) */
+#define UB_DMA_BSCSAV			  0x006A0640 /* Buff. Data Blanket Byte Swap Ctl Save Reg (For Diag) (R) */
+
+#define UB_UDMA_OFFSET			  0x006A087C /* Unbuffered DMA Offset Register (RW) */
+#define UB_UDMA_DATA			  0x006A0880 /*Unbuffered DMA Data Register (W) */
+#define UB_DMA_UBSCFB			  0x006A0C08 /* Unbuffered DMA Byte Swap Ctl Reg (FBC space) (RW) */
+#define UB_UDMA_STATE			  0x006A0C10 /* Unbuffered DMA State Register (R) */
+#define UB_UDMA_DIAG_AFLAG		  0x006A0C18 /* Unbuffered DMA Controller Adr Flags (Diagnostic) (R) */
+#define UB_UDMA_DIAG_ADDR		  0x006A0C1C /* Unbuffered DMA Controller Adr (Diagnostic) (R) */
+#define UB_DMA_UBSCBLK			  0x006A0E00 /* Unbuffered Data Blanket Byte Swap Ctl Reg. (W) */
+#define UB_DMA_UBSCSAV			  0x006A0E40 /* Unbuffered Data Blanket Byte Swap Ctl Save Reg (RW) */
+
+#define B2_DMA_OFFSET			  0x00AA007C /* Buffered DMA Offset Register (RW) */
+#define B2_DMA_DATA			  0x00AA0080 /*Buffered DMA Data Register (W) */
+#define B2_DMA_BSCBLK_RO		  0x00AA0404 /* Address for read of B2_DMA_BSCBLK. (R) */
+#define B2_DMA_BSCFB			  0x00AA0408 /* Buffered DMA Byte Swap Ctl Reg (FBC space) (RW) */
+#define B2_DMA_DDBSC			  0x00AA040C /*  () */
+#define B2_DMA_STATE			  0x00AA0410 /* Buffered DMA State Register (R) */
+#define B2_DMA_DIAG_AFLAG		  0x00AA0418 /* Buffered DMA Controller Adr flags (Diagnostic) (R) */
+#define B2_DMA_DIAG_ADDR		  0x00AA041C /* Buffered DMA Controller Adr (Diagnostic) (R) */
+#define B2_DMA_BSCBLK			  0x00AA0600 /* Buffered Data Blanket Byte Swap Ctl Reg (W) */
+#define B2_DMA_BSCSAV			  0x00AA0640 /* Buffered Data Blanket Byte Swap Ctl Save Reg (RW) */
+
+#define B2_DWA				  0x00AC1000 /* Destination Window Address Register (RW) */
+#define B2_SWA				  0x00AC1004 /* Source Window Address Register (RW) */
+#define B2_DWAX				  0x00AC1010 /* Destination Window X Address Register (18 bits) (RW) */
+#define B2_DWAY				  0x00AC1014 /* Destination Window Y Address Register (18 bits) (RW) */
+#define B2_SWAX				  0x00AC1018 /* Source Window X Address Register (18 bits) (RW) */
+#define B2_SWAY				  0x00AC101C /* Source Window Y Address Register (18 bits) (RW) */
+#define B2_VBS				  0x00AC1020 /* Vertical Blank Sync Register (RW) */
+#define B2_TCR				  0x00AC1024 /* Throttle Control Register (RW) */
+#define B2_YBC				  0x00AC1028 /* YUV to RGB Brightness Control Register (RW) */
+#define B2_PSF				  0x00AC1030 /* Pixel Scale Factor Register (RW) */
+#define B2_PSS				  0x00AC1034 /* Pixel Scale Setup Register (RW) */
+#define B2_PS_RED			  0x00AC1038 /* Pixel Scale Accumulate Red Register (RW) */
+#define B2_PS_GRN			  0x00AC1040 /* Pixel Scale Accumulate Green Register (RW) */
+#define B2_PS_BLU			  0x00AC1044 /* Pixel Scale Accumulate Blue Register (RW) */
+#define B2_WCLIP1UL			  0x00AC1050 /* First Level Window Clip Upper Left Corner Reg (RW) */
+#define B2_WCLIP1LR			  0x00AC1054 /* First Level Window Clip Lower Right Corner Reg (RW) */
+#define B2_DSAX				  0x00AC2000 /* Destination Screen X Address Reg (19 bits) (RW) */
+#define B2_DSAY				  0x00AC2004 /* Destination Screen Y Address Regr (19 bits) (RW) */
+#define B2_SSAX				  0x00AC2008 /* Source Screen X Address Register (19 bits) (RW) */
+#define B2_SSAY				  0x00AC200C /* Source Screen Y Address Register (19 bits) (RW) */
+#define B2_BSE1				  0x00AC2010 /* Binc State Element 1 Register (R) */
+#define B2_BSE2				  0x00AC2014 /* Binc State Element 2 Register (R) */
+
+#define B2_MNOOP_R0			  0x00B00000 /* MFU Noop Opcode / Load Master Register 0 (RW) */
+#define B2_MNOOP_R1			  0x00B00004 /* MFU Noop Opcode / Load Master Register 1 (RW) */
+#define B2_MNOOP_R2			  0x00B00008 /* MFU Noop Opcode / Load Master Register 2 (RW) */
+#define B2_MNOOP_R3			  0x00B0000C /* MFU Noop Opcode / Load Master Register 3 (RW) */
+#define B2_MNOOP_R4			  0x00B00010 /* MFU Noop Opcode / Load Master Register 4 (RW) */
+#define B2_MNOOP_R5			  0x00B00014 /* MFU Noop Opcode / Load Master Register 5 (RW) */
+#define B2_MNOOP_R6			  0x00B00018 /* MFU Noop Opcode / Load Master Register 6 (RW) */
+#define B2_MNOOP_R7			  0x00B0001C /* MFU Noop Opcode / Load Master Register 7 (RW) */
+#define B2_MNOOP_R8			  0x00B00020 /* MFU Noop Opcode / Load Master Register 8 (RW) */
+#define B2_MNOOP_R9			  0x00B00024 /* MFU Noop Opcode / Load Master Register 9 (RW) */
+#define B2_MNOOP_R10			  0x00B00028 /* MFU Noop Opcode / Load Master Register 10 (RW) */
+#define B2_MNOOP_R11			  0x00B0002C /* MFU Noop Opcode / Load Master Register 11 (RW) */
+#define B2_MNOOP_R12			  0x00B00030 /* MFU Noop Opcode / Load Master Register 12 (RW) */
+#define B2_MNOOP_R13			  0x00B00034 /* MFU Noop Opcode / Load Master Register 13 (RW) */
+#define B2_MNOOP_TD			  0x00B00044 /* MFU Noop Opcode / Load Master TD Register (RW) */
+#define B2_MSLOAD_R0			  0x00B00100 /* Master To Slave Load Opcode / Load Master Register 0 (W) */
+#define B2_MSLOAD_R1			  0x00B00104 /* Master To Slave Load Opcode / Load Master Register 1 (W) */
+#define B2_MSLOAD_R2			  0x00B00108 /* Master To Slave Load Opcode / Load Master Register 2 (W) */
+#define B2_MSLOAD_R3			  0x00B0010C /* Master To Slave Load Opcode / Load Master Register 3 (W) */
+#define B2_MSLOAD_R4			  0x00B00110 /* Master To Slave Load Opcode / Load Master Register 4 (W) */
+#define B2_MSLOAD_R5			  0x00B00114 /* Master To Slave Load Opcode / Load Master Register 5 (W) */
+#define B2_MSLOAD_R6			  0x00B00118 /* Master To Slave Load Opcode / Load Master Register 6 (W) */
+#define B2_MSLOAD_R7			  0x00B0011C /* Master To Slave Load Opcode / Load Master Register 7 (W) */
+#define B2_MSLOAD_R8			  0x00B00120 /* Master To Slave Load Opcode / Load Master Register 8 (W) */
+#define B2_MSLOAD_R9			  0x00B00124 /* Master To Slave Load Opcode / Load Master Register 9 (W) */
+#define B2_MSLOAD_R10			  0x00B00128 /* Master To Slave Load Opcode / Load Master Register 10 (W) */
+#define B2_MSLOAD_R11			  0x00B0012C /* Master To Slave Load Opcode / Load Master Register 11 (W) */
+#define B2_MSLOAD_R12			  0x00B00130 /* Master To Slave Load Opcode / Load Master Register 12 (W) */
+#define B2_MSLOAD_R13			  0x00B00134 /* Master To Slave Load Opcode / Load Master Register 13 (W) */
+#define B2_MSLOAD_TD			  0x00B00144 /* Master To Slave Load Opcode / Load Master TD Register (W) */
+#define B2_TEXT16_R0			  0x00B00400 /* 16 Bit Text Fill Opcode / Load Master Register 0 (W) */
+#define B2_TEXT16_R1			  0x00B00404 /* 16 Bit Text Fill Opcode / Load Master Register 1 (W) */
+#define B2_TEXT16_R2			  0x00B00408 /* 16 Bit Text Fill Opcode / Load Master Register 2 (W) */
+#define B2_TEXT16_R3			  0x00B0040C /* 16 Bit Text Fill Opcode / Load Master Register 3 (W) */
+#define B2_TEXT16_TD			  0x00B00444 /* 16 Bit Text Fill Opcode / Load Master TD Register (W) */
+#define B2_TEXT8_R0			  0x00B00480 /* 8 Bit Text Fill Opcode / Load Master Register 0 (W) */
+#define B2_TEXT8_R1			  0x00B00484 /* 8 Bit Text Fill Opcode / Load Master Register 1 (W) */
+#define B2_TEXT8_R2			  0x00B00488 /* 8 Bit Text Fill Opcode / Load Master Register 2 (W) */
+#define B2_TEXT8_R3			  0x00B0048C /* 8 Bit Text Fill Opcode / Load Master Register 3 (W) */
+#define B2_TEXT8_TD			  0x00B004C4 /* 8 Bit Text Fill Opcode / Load Master TD Register (W) */
+#define B2_TEXT16SETUP_R0		  0x00B00500 /* 16 Bit Text Fill Setup Opcode / Load Master Register 0 (W) */
+#define B2_TEXT16SETUP_R1		  0x00B00504 /* 16 Bit Text Fill Setup Opcode / Load Master Register 1 (W) */
+#define B2_TEXT16SETUP_R2		  0x00B00508 /* 16 Bit Text Fill Setup Opcode / Load Master Register 2 (W) */
+#define B2_TEXT16SETUP_R3		  0x00B0050C /* 16 Bit Text Fill Setup Opcode / Load Master Register 3 (W) */
+#define B2_TEXT16SETUP_TD		  0x00B00544 /* 16 Bit Text Fill Setup Opcode / Load Master TD Register (W) */
+#define B2_TEXT8SETUP_R0		  0x00B00580 /* 8 Bit Text Fill Setup Opcode / Load Master Register 0 (W) */
+#define B2_TEXT8SETUP_R1		  0x00B00584 /* 8 Bit Text Fill Setup Opcode / Load Master Register 1 (W) */
+#define B2_TEXT8SETUP_R2		  0x00B00588 /* 8 Bit Text Fill Setup Opcode / Load Master Register 2 (W) */
+#define B2_TEXT8SETUP_R3		  0x00B0058C /* 8 Bit Text Fill Setup Opcode / Load Master Register 3 (W) */
+#define B2_TEXT8SETUP_TD		  0x00B005C4 /* 8 Bit Text Fill Setup Opcode / Load Master TD Register (W) */
+#define B2_SOLIDFILL_R0			  0x00B00800 /* Solid Fill Opcode / Load Master Register 0 (W) */
+#define B2_SOLIDFILL_R1			  0x00B00804 /* Solid Fill Opcode / Load Master Register 1 (W) */
+#define B2_SOLIDFILL_R2			  0x00B00808 /* Solid Fill Opcode / Load Master Register 2 (W) */
+#define B2_SOLIDFILL_R3			  0x00B0080C /* Solid Fill Opcode / Load Master Register 3 (W) */
+#define B2_SOLIDFILLT_R0		  0x00B00880 /* Solid Fill Throttled Opcode / Load Master Register 0 (W) */
+#define B2_SOLIDFILLT_R1		  0x00B00884 /* Solid Fill Throttled Opcode / Load Master Register 1 (W) */
+#define B2_SOLIDFILLT_R2		  0x00B00888 /* Solid Fill Throttled Opcode / Load Master Register 2 (W) */
+#define B2_SOLIDFILLT_R3		  0x00B0088C /* Solid Fill Throttled Opcode / Load Master Register 3 (W) */
+#define B2_TDFILL_R0			  0x00B00900 /* TD Fill Opcode / Load Master Register 0 (W) */
+#define B2_TDFILL_R1			  0x00B00904 /* TD Fill Opcode / Load Master Register 1 (W) */
+#define B2_TDFILL_R2			  0x00B00908 /* TD Fill Opcode / Load Master Register 2 (W) */
+#define B2_TDFILL_R3			  0x00B0090C /* TD Fill Opcode / Load Master Register 3 (W) */
+#define B2_TDFILL_TD			  0x00B00944 /* TD Fill Opcode / Load Master TD Register (W) */
+#define B2_TDFILLT_R0			  0x00B00980 /* TD Fill Throttled Opcode / Load Master Register 0 (W) */
+#define B2_TDFILLT_R1			  0x00B00984 /* TD Fill Throttled Opcode / Load Master Register 1 (W) */
+#define B2_TDFILLT_R2			  0x00B00988 /* TD Fill Throttled Opcode / Load Master Register 2 (W) */
+#define B2_TDFILLT_R3			  0x00B0098C /* TD Fill Throttled Opcode / Load Master Register 3 (W) */
+#define B2_TDFILLT_TD			  0x00B009C4 /* TD Fill Throttled Opcode / Load Master TD Register (W) */
+#define B2_BLT_R0			  0x00B00C00 /* Blt Opcode / Load Master Register 0 (W) */
+#define B2_BLT_R1			  0x00B00C04 /* Blt Opcode / Load Master Register 1 (W) */
+#define B2_BLT_R2			  0x00B00C08 /* Blt Opcode / Load Master Register 2 (W) */
+#define B2_BLT_R3			  0x00B00C0C /* Blt Opcode / Load Master Register 3 (W) */
+#define B2_BLT_R4			  0x00B00C10 /* Blt Opcode / Load Master Register 4 (W) */
+#define B2_BLT_R5			  0x00B00C14 /* Blt Opcode / Load Master Register 5 (W) */
+#define B2_EXBLT_R0			  0x00B00C80 /* Expanding Blt Opcode / Load Master Register 0 (W) */
+#define B2_EXBLT_R1			  0x00B00C84 /* Expanding Blt Opcode / Load Master Register 1 (W) */
+#define B2_EXBLT_R2			  0x00B00C88 /* Expanding Blt Opcode / Load Master Register 2 (W) */
+#define B2_EXBLT_R3			  0x00B00C8C /* Expanding Blt Opcode / Load Master Register 3 (W) */
+#define B2_EXBLT_R4			  0x00B00C90 /* Expanding Blt Opcode / Load Master Register 4 (W) */
+#define B2_EXBLT_R5			  0x00B00C94 /* Expanding Blt Opcode / Load Master Register 5 (W) */
+#define B2_EXBLT_R11			  0x00B00CAC /* Expanding Blt Opcode / Load Master Register 11 (W) */
+
+#define B2_SR0				  0x00B04000 /* MFU Slave Register 0 (RW) */
+#define B2_SR1				  0x00B04004 /* MFU Slave Register 1 (RW) */
+#define B2_SR2				  0x00B04008 /* MFU Slave Register 2 (RW) */
+#define B2_SR3				  0x00B0400C /* MFU Slave Register 3 (RW) */
+#define B2_SR4				  0x00B04010 /* MFU Slave Register 4 (RW) */
+#define B2_SR5				  0x00B04014 /* MFU Slave Register 5 (RW) */
+#define B2_SR6				  0x00B04018 /* MFU Slave Register 6 (RW) */
+#define B2_SR7				  0x00B0401C /* MFU Slave Register 7 (RW) */
+#define B2_SR8				  0x00B04020 /* MFU Slave Register 8 (RW) */
+#define B2_SR9				  0x00B04024 /* MFU Slave Register 9 (RW) */
+#define B2_SR10				  0x00B04028 /* MFU Slave Register 10 (RW) */
+#define B2_SR11				  0x00B0402C /* MFU Slave Register 11 (RW) */
+#define B2_SR12				  0x00B04030 /* MFU Slave Register 12 (RW) */
+#define B2_SR13				  0x00B04034 /* MFU Slave Register 13 (RW) */
+#define B2_SR14				  0x00B04038 /* MFU Slave Register 14 (RW) */
+#define B2_SR15				  0x00B0403C /* MFU Slave Register 15 (RW) */
+#define B2_STD				  0x00B04044 /* MFU Slave Transfer Data Register (RW) */
+#define B2_SOV				  0x00B08000 /* MFU Scoreboard Override Register (RW) */
+#define B2_SB				  0x00B08004 /* MFU Scoreboard Register (R) */
+#define B2_MFU_DIAG			  0x00B08040 /* MFU Diagnostic Register (R) */
+#define B2_MFU_BSCTD			  0x00B08044 /* MFU Byte Swap Control Register (TD operations) (RW) */
+#define B2_MFU_BSCCTL			  0x00B08048 /* MFU Byte Swap Control Register (register pair opcodes) (RW) */
+#define B2_MNOOP			  0x00B0C000 /* MFU Noop Opcode / Don't Load Any Master Registers (W) */
+#define B2_NOSB				  0x00B0C080 /* MFU Noop Opcode (No Scoreboard) / Don't Load Any Master Registers (W) */
+#define B2_MSLOAD			  0x00B0C100 /* Master To Slave Load Opcode / Don't Load Any Master Registers (W) */
+#define B2_TEXT16			  0x00B0C400 /* 16 Bit Text Fill Opcode / Don't Load Any Master Registers (W) */
+#define B2_TEXT8			  0x00B0C480 /* 8 Bit Text Fill Opcode / Don't Load Any Master Registers (W) */
+#define B2_TEXT16SETUP			  0x00B0C500 /* 16 Bit Text Fill Setup Opcode / Don't Load Any Master Registers (W) */
+#define B2_TEXT8SETUP			  0x00B0C580 /* 8 Bit Text Fill Setup Opcode / Don't Load Any Master Registers (W) */
+#define B2_SOLIDFILL			  0x00B0C800 /* Solid Fill Opcode / Don't Load Any Master Registers (W) */
+#define B2_SOLIDFILLT			  0x00B0C880 /* Solid Fill Throttled Opcode / Don't Load Any Master Registers (W) */
+#define B2_TDFILL			  0x00B0C900 /* TD Fill Opcode / Don't Load Any Master Registers (W) */
+#define B2_TDFILLT			  0x00B0C980 /* TD Fill Throttled Opcode / Don't Load Any Master Registers (W) */
+#define B2_BLT				  0x00B0CC00 /* Blt Opcode / Don't Load Any Master Registers (W) */
+#define B2_EXBLT			  0x00B0CC80 /* Expanding Blt Opcode / Don't Load Any Master Registers (W) */
+#define B2_SS0				  0x00B10000 /* MFU Setup Slave Register 0 (RW) */
+#define B2_SS1				  0x00B10004 /* MFU Setup Slave Register 1 (RW) */
+#define B2_SS2				  0x00B10008 /* MFU Setup Slave Register 2 (RW) */
+#define B2_SS3				  0x00B1000C /* MFU Setup Slave Register 3 (RW) */
+#define B2_SS4				  0x00B10010 /* MFU Setup Slave Register 4 (RW) */
+#define B2_SS5				  0x00B10014 /* MFU Setup Slave Register 5 (RW) */
+#define B2_SS6				  0x00B10018 /* MFU Setup Slave Register 6 (RW) */
+#define B2_SSTD				  0x00B10044 /* MFU Setup Slave Transfer Data Register (RW) */
+
+/* Remapped MFU Registers  */
+#define B2_MNOOP_R0R1_REMAP		  0x00B20000 /* Start Of MFU Noop Opcode / Load Master Register 0 and 1 (W) */
+#define B2_NOSB_R0R1_REMAP		  0x00B20080 /* Start Of MFU Noop Opcode (No Scoreboard) / Load Master Register 0 and 1 (W) */
+#define B2_MSLOAD_R0R1_REMAP		  0x00B20100 /* Master To Slave Load Opcode / Load Master Register 0 and 1 (W) */
+#define B2_TEXT16_R0R1_REMAP		  0x00B20400 /* 16 Bit Text Fill Opcode / Load Master Register 0 and 1 (W) */
+#define B2_TEXT8_R0R1_REMAP		  0x00B20480 /* 8 Bit Text Fill Opcode / Load Master Register 0 and 1 (W) */
+#define B2_TEXT16SETUP_R0R1_REMAP	  0x00B20500 /* 16 Bit Text Fill Setup Opcode / Load Master Register 0 and 1 (W) */
+#define B2_TEXT8SETUP_R0R1_REMAP	  0x00B20580 /* 8 Bit Text Fill Setup Opcode / Load Master Register 0 and 1 (W) */
+#define B2_SOLIDFILL_R0R1_REMAP		  0x00B20800 /* Solid Fill Opcode / Load Master Register 0 and 1 (W) */
+#define B2_SOLIDFILLT_R0R1_REMAP	  0x00B20880 /* Solid Fill Throttled Opcode / Load Master Register 0 and 1 (W) */
+#define B2_TDFILL_R0R1_REMAP		  0x00B20900 /* TD Fill Opcode / Load Master Register 0 and 1 (W) */
+#define B2_TDFILLT_R0R1_REMAP		  0x00B20980 /* TD Fill Throttled Opcode / Load Master Register 0 and 1 (W) */
+#define B2_BLT_R0R1_REMAP		  0x00B20C00 /* Blt Opcode / Load Master Register 0 and 1 (W) */
+#define B2_EXBLT_R0R1_REMAP		  0x00B20C80 /* Expanding Blt Opcode / Load Master Register 0 and 1 (W) */
+#define B2_MNOOP_R2R3_REMAP		  0x00B24000 /* Start Of MFU Noop Opcode / Load Master Register 2 and 3 (W) */
+#define B2_NOSB_R2R3_REMAP		  0x00B24080 /* Start Of MFU Noop Opcode (No Scoreboard) / Load Master Register 2 and 3 (W) */
+#define B2_MSLOAD_R2R3_REMAP		  0x00B24100 /* Master To Slave Load Opcode / Load Master Register 2 and 3 (W) */
+#define B2_TEXT16_R2R3_REMAP		  0x00B24400 /* 16 Bit Text Fill Opcode / Load Master Register 2 and 3 (W) */
+#define B2_TEXT8_R2R3_REMAP		  0x00B24480 /* 8 Bit Text Fill Opcode / Load Master Register 2 and 3 (W) */
+#define B2_TEXT16SETUP_R2R3_REMAP	  0x00B24500 /* 16 Bit Text Fill Setup Opcode / Load Master Register 2 and 3 (W) */
+#define B2_TEXT8SETUP_R2R3_REMAP	  0x00B24580 /* 8 Bit Text Fill Setup Opcode / Load Master Register 2 and 3 (W) */
+#define B2_SOLIDFILL_R2R3_REMAP		  0x00B24800 /* Solid Fill Opcode / Load Master Register 2 and 3 (W) */
+#define B2_SOLIDFILLT_R2R3_REMAP	  0x00B24880 /* Solid Fill Throttled Opcode / Load Master Register 2 and 3 (W) */
+#define B2_TDFILL_R2R3_REMAP		  0x00B24900 /* TD Fill Opcode / Load Master Register 2 and 3 (W) */
+#define B2_TDFILLT_R2R3_REMAP		  0x00B24980 /* TD Fill Throttled Opcode / Load Master Register 2 and 3 (W) */
+#define B2_BLT_R2R3_REMAP		  0x00B24C00 /* Blt Opcode / Load Master Register 2 and 3 (W) */
+#define B2_EXBLT_R2R3_REMAP		  0x00B24C80 /* Expanding Blt Opcode / Load Master Register 2 and 3 (W) */
+#define B2_MNOOP_TD_REMAP		  0x00B28000 /* Start Of MFU Noop Opcode / Load Master Register TD (W) */
+#define B2_NOSB_TD_REMAP		  0x00B28080 /* Start Of MFU Noop Opcode (No Scoreboard) / Load Master Register TD (W) */
+#define B2_MSLOAD_TD_REMAP		  0x00B28100 /* Master To Slave Load Opcode / Load Master Register TD (W) */
+#define B2_TEXT16_TD_REMAP		  0x00B28400 /* 16 Bit Text Fill Opcode / Load Master Register TD (W) */
+#define B2_TEXT8_TD_REMAP		  0x00B28480 /* 8 Bit Text Fill Opcode / Load Master Register TD (W) */
+#define B2_TEXT16SETUP_TD_REMAP		  0x00B28500 /* 16 Bit Text Fill Setup Opcode / Load Master Register TD (W) */
+#define B2_TEXT8SETUP_TD_REMAP		  0x00B28580 /* 8 Bit Text Fill Setup Opcode / Load Master Register TD (W) */
+#define B2_SOLIDFILL_TD_REMAP		  0x00B28800 /* Solid Fill Opcode / Load Master Register TD (W) */
+#define B2_SOLIDFILLT_TD_REMAP		  0x00B28880 /* Solid Fill Throttled Opcode / Load Master Register TD (W) */
+#define B2_TDFILL_TD_REMAP		  0x00B28900 /* TD Fill Opcode / Load Master Register TD (W) */
+#define B2_TDFILLT_TD_REMAP		  0x00B28980 /* TD Fill Throttled Opcode / Load Master Register TD (W) */
+#define B2_BLT_TD_REMAP			  0x00B28C00 /* Blt Opcode / Load Master Register TD (W) */
+#define B2_EXBLT_TD_REMAP		  0x00B28C80 /* Expanding Blt Opcode / Load Master Register TD (W) */
+#define B2_MNOOP_ALT			  0x00B2C000 /* Start Of MFU Noop Opcode / Load Master Register Alternating Between MNOOP_R0R1 and MNOOP_R2R3 (W) */
+#define B2_NOSB_ALT			  0x00B2C080 /* Start Of MFU Noop Opcode (No Scoreboard) (W) */
+#define B2_MSLOAD_ALT			  0x00B2C100 /* Master To Slave Load Opcode (W) */
+#define B2_TEXT16_ALT			  0x00B2C400 /* 16 Bit Text Fill Opcode / Load Master Register Alternating Between MNOOP_R0R1 and TEXT16_R2R3 (W) */
+#define B2_TEXT8_ALT			  0x00B2C480 /* 8 Bit Text Fill Opcode / Load Master Register Alternating Between MNOOP_R0R1 and TEXT8_R2R3 (W) */
+#define B2_TEXT16SETUP_ALT		  0x00B2C500 /* 16 Bit Text Fill Setup Opcode (W) */
+#define B2_TEXT8SETUP_ALT		  0x00B2C580 /* 8 Bit Text Fill Setup Opcode (W) */
+#define B2_SOLIDFILL_ALT		  0x00B2C800 /* Solid Fill Opcode / Load Master Register Alternating Between MNOOP_R0R1 and SOLIDFILL_R2R3 (W) */
+#define B2_SOLIDFILLT_ALT		  0x00B2C880 /* Solid Fill Throttled Opcode / Load Master Register Alternating Between MNOOP_R0R1/SOLIDFILLT_R2R3 (W) */
+#define B2_TDFILL_ALT			  0x00B2C900 /* TD Fill Opcode / Load Master Register Alternating Between MNOOP_R0R1 and TDFILL_R2R3 (W) */
+#define B2_TDFILLT_ALT			  0x00B2C980 /* TD Fill Throttled Opcode / Load Master Register Alternating Between MNOOP_R0R1 and TDFILLT_R2R3 (W) */
+#define B2_MNOOP_R0R1			  0x00B3C000 /* MFU Noop Opcode / Load Master Register 0 and 1 (W) */
+#define B2_MNOOP_R2R3			  0x00B3C008 /* MFU Noop Opcode / Load Master Register 2 and 3 (W) */
+#define B2_MNOOP_R4R5			  0x00B3C010 /* MFU Noop Opcode / Load Master Register 4 and 5 (W) */
+#define B2_MNOOP_R6R7			  0x00B3C018 /* MFU Noop Opcode / Load Master Register 6 and 7 (W) */
+#define B2_MNOOP_R8R9			  0x00B3C020 /* MFU Noop Opcode / Load Master Register 8 and 9 (W) */
+#define B2_MNOOP_R10R11			  0x00B3C028 /* MFU Noop Opcode / Load Master Register 10 and 11 (W) */
+#define B2_MNOOP_R12R13			  0x00B3C030 /* MFU Noop Opcode / Load Master Register 12 and 13 (W) */
+#define B2_TEXT16_R0R1			  0x00B3C400 /* 16 Bit Text Fill Opcode / Load Master Register 0 and 1 (W) */
+#define B2_TEXT16_R2R3			  0x00B3C408 /* 16 Bit Text Fill Opcode / Load Master Register 2 and 3 (W) */
+#define B2_TEXT8_R0R1			  0x00B3C480 /* 8 Bit Text Fill Opcode / Load Master Register 0 and 1 (W) */
+#define B2_TEXT8_R2R3			  0x00B3C488 /* 8 Bit Text Fill Opcode / Load Master Register 2 and 3 (W) */
+#define B2_TEXT16SETUP_R0R1		  0x00B3C500 /* 16 Bit Text Fill Setup Opcode / Load Master Register 0 and 1 (W) */
+#define B2_TEXT16SETUP_R2R3		  0x00B3C508 /* 16 Bit Text Fill Setup Opcode / Load Master Register 2 and 3 (W) */
+#define B2_TEXT8SETUP_R0R1		  0x00B3C580 /* 8 Bit Text Fill Setup Opcode / Load Master Register 0 and 1 (W) */
+#define B2_TEXT8SETUP_R2R3		  0x00B3C588 /* 8 Bit Text Fill Setup Opcode / Load Master Register 2 and 3 (W) */
+#define B2_SOLIDFILL_R0R1		  0x00B3C800 /* Solid Fill Opcode / Load Master Register 0 and 1 (W) */
+#define B2_SOLIDFILL_R2R3		  0x00B3C808 /* Solid Fill Opcode / Load Master Register 2 and 3 (W) */
+#define B2_SOLIDFILLT_R0R1		  0x00B3C880 /* Solid Fill Throttled Opcode / Load Master Register 0 and 1 (W) */
+#define B2_SOLIDFILLT_R2R3		  0x00B3C888 /* Solid Fill Throttled Opcode / Load Master Register 2 and 3 (W) */
+#define B2_TDFILL_R0R1			  0x00B3C900 /* TD Fill Opcode / Load Master Register 0 and 1 (W) */
+#define B2_TDFILL_R2R3			  0x00B3C908 /* TD Fill Opcode / Load Master Register 2 and 3 (W) */
+#define B2_TDFILLT_R0R1			  0x00B3C980 /* TD Fill Throttled Opcode / Load Master Register 0 and 1 (W) */
+#define B2_TDFILLT_R2R3			  0x00B3C988 /* TD Fill Throttled Opcode / Load Master Register 2 and 3 (W) */
+#define B2_BLT_R0R1			  0x00B3CC00 /* Blt Opcode / Load Master Register 0 and 1 (W) */
+#define B2_BLT_R2R3			  0x00B3CC08 /* Blt Opcode / Load Master Register 2 and 3 (W) */
+#define B2_BLT_R4R5			  0x00B3CC10 /* Blt Opcode / Load Master Register 4 and 5 (W) */
+#define B2_EXBLT_R0R1			  0x00B3CC80 /* Expanding Blt Opcode / Load Master Register 0 and 1 (W) */
+#define B2_EXBLT_R2R3			  0x00B3CC88 /* Expanding Blt Opcode / Load Master Register 2 and 3 (W) */
+#define B2_EXBLT_R4R5			  0x00B3CC90 /* Expanding Blt Opcode / Load Master Register 4 and 5 (W) */
+#define B2_EXBLT_R10R11			  0x00B3CCA8 /* Expanding Blt Opcode / Load Master Register 10 and 11 (W) */
+
+
+#define DSM_NO_BYTE_SWAP			0xe4e4e4e4
+#define DSM_RGBA_TO_ARGB_BYTE_SWAP		0x39393939
+#define DSM_ARGB_TO_RGBA_BYTE_SWAP		0x93939393
+#define DSM_PDU_BYTE_SWAP_DEFAULT		0x1b1b1b1b
+#define DSM_DMA_BYTE_SWAP_DEFAULT		0x1b1b1b1b
+#define DSM_MFU_BYTE_SWAP_DEFAULT		0x1b1b1b1b
+#define DSM_HOST_IS_LITTLE_ENDIAN		0x01010101
+#define DSM_HOST_IS_BIG_ENDIAN			0x00000000
+
+#define B2_DBA_BUF_A		(0 << 12)
+#define B2_DBA_BUF_AB		(1 << 12)
+#define B2_DBA_BUF_ABC		(2 << 12)
+#define B2_DBA_BUF_ABCD		(3 << 12)
+
+#define B2_DBA_DIRECT		(0 << 6)
+#define B2_DBA_IND_BG		(1 << 6)
+#define B2_DBA_IND_FG		(2 << 6)
+#define B2_DBA_IND_BG_FG	(3 << 6)
+#define B2_DBA_OTC(x)		((x) << 24)
+#define B2_DBA_P		(1 << 9)
+#define B2_DBA_S		(1 << 10)
+#define B2_DBA_D		(1 << 11)
+#define B2_DBA_BIN8I		(0 << 16)	/* 8 bit indexed */  /* page 335 */
+#define B2_DBA_BIN8F		(7 << 16)	/* ARGB888 truecolor */
+#define B2_DBA_OTC04		(2 << 24)	/* 4 bytes per word access */
+#define B2_DBA_OTC01		(0 << 24)	/* one ARGB888 per word access */
+
+#define B2_EN2D_BYTE_MODE	0x30 | 0x80	/* mode and disable pixel interpolation */
+#define B2_EN2D_WORD_MODE	0x50 | 0x80
+
+#define UB_CP_CURSOR_ENABLE	       0x80000000
+
 
 static char *mode_option; /* empty means take video mode from ROM */
 
@@ -246,7 +994,7 @@ static void visfx_copyarea(struct fb_info *info, const struct fb_copyarea *area)
 }
 
 static int visfx_setcolreg(unsigned regno, unsigned red, unsigned green,
-                             unsigned blue, unsigned transp,
+			     unsigned blue, unsigned transp,
 			     struct fb_info *info)
 {
 	u32 r, g, b;
@@ -398,7 +1146,7 @@ static int visfx_init_pll(struct fb_info *info, u32 reg, u32 value1, u32 value2)
 		return ret;
 
 	visfx_writel(info, reg, value2 | 0x10000);
-        return visfx_wait_pll(info);
+	return visfx_wait_pll(info);
 }
 
 static int visfx_set_pll(struct fb_info *info, u32 reg, unsigned long clock)
@@ -575,7 +1323,7 @@ static const struct fb_ops visfx_ops = {
 	.fb_setcolreg	= visfx_setcolreg,
 	.fb_blank	= visfx_blank,
 	.fb_fillrect	= visfx_fillrect,
-	.fb_copyarea    = visfx_copyarea,
+	.fb_copyarea	= visfx_copyarea,
 	.fb_imageblit	= visfx_imageblit,
 	.fb_cursor	= visfx_cursor,
 	.fb_sync	= visfx_sync,
@@ -832,7 +1580,7 @@ static void visfx_setup(struct fb_info *info)
 	}
 
 	// visfx_clear_buffer(info, 0x00000a00, par->ibmap0, 0x03f00000, 0);
-	visfx_buffer_setup(info, 2, 0x08000084, 0, 0);  // 8000084 für Overlay
+	visfx_buffer_setup(info, 2, 0x08000084, 0, 0);
 
 	visfx_wait_write_pipe_empty(info);
 	visfx_writel(info, B2_BMAP_DBA, par->ibmap0);
@@ -1088,12 +1836,12 @@ static int __init visfx_init_device(struct pci_dev *pdev, struct sti_struct *sti
 	if (ret)
 		goto err_out_dealloc_cmap;
 
-        fb_info(info, "visfxfb %dx%d-%d frame buffer device, %s, mmio: 0x%04lx\n",
-                info->var.xres,
-                info->var.yres,
-                info->var.bits_per_pixel,
-                info->fix.id,
-                info->fix.mmio_start);
+	fb_info(info, "visfxfb %dx%d-%d frame buffer device, %s, mmio: 0x%04lx\n",
+		info->var.xres,
+		info->var.yres,
+		info->var.bits_per_pixel,
+		info->fix.id,
+		info->fix.mmio_start);
 
 	return 0;
 
@@ -1173,9 +1921,9 @@ static const struct pci_device_id visfx_pci_tbl[] = {
 MODULE_DEVICE_TABLE(pci, visfx_pci_tbl);
 
 static struct pci_driver visfx_driver = {
-	.name      = KBUILD_MODNAME,
+	.name	   = KBUILD_MODNAME,
 	.id_table  = visfx_pci_tbl,
-	.probe     = visfx_probe_pci,
+	.probe	   = visfx_probe_pci,
 	.remove    = visfx_remove,
 };
 
