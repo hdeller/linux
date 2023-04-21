@@ -269,6 +269,8 @@ static int visfx_setcolreg(unsigned regno, unsigned red, unsigned green,
 		r = (red >> 8) << 16;
 		g = (green >> 8) << 8;
 		b = (blue >> 8);
+		if (regno < 16)
+			((u32 *) info->pseudo_palette)[regno] = r | g | b;
 		set_clut:
 		visfx_writel(info, B2_LLCA, regno);
 		visfx_writel(info, B2_LUTD, r | g | b);
@@ -559,7 +561,11 @@ static int visfx_cursor(struct fb_info *info, struct fb_cursor *cursor)
 		visfx_update_cursor_image(info, cursor);
 
 	if (cursor->set & FB_CUR_SETCMAP) {
-		color = visfx_cmap_entry(info, cursor->image.fg_color);
+		color = cursor->image.fg_color;
+		if (info->fix.visual == FB_VISUAL_PSEUDOCOLOR)
+			color = ((u32 *) info->pseudo_palette)[color & 0x0f];
+		else
+			color = visfx_cmap_entry(info, color);
 		visfx_writel(info, UB_CB, color);
 		visfx_writel(info, UB_CF, 0);
 	}
