@@ -1233,6 +1233,10 @@ static int __init stifb_init_fb(struct sti_struct *sti, int bpp_pref)
 	default:
 		printk(KERN_WARNING "stifb: '%s' (id: 0x%08x) not supported.\n",
 			dev_name, fb->id);
+		/* fall through */
+	case CRT_ID_SUMMIT:	/* Summit FX2, FX4, FX6 - not supported here */
+	case CRT_ID_LEGO:	/* Lego FX5, FX10 ... */
+	case CRT_ID_PINNACLE:	/* Pinnacle FXe */
 		goto out_err0;
 	}
 	
