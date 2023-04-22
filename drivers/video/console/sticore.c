@@ -1148,7 +1148,7 @@ int sti_call(const struct sti_struct *sti, unsigned long func,
 	return ret;
 }
 
-#if defined(CONFIG_FB_STI)
+#if defined(CONFIG_FB_STI) || defined(FB_VISUALIZEFX)
 /* check if given fb_info is the primary device */
 int fb_is_primary_device(struct fb_info *info)
 {
