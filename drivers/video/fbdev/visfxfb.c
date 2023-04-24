@@ -913,20 +913,20 @@ static void visfx_imageblit_mono(struct fb_info *info, const char *data, int dx,
 	int _width, x;
 
 	visfx_writel(info, B2_DBA, B2_DBA_OTC(5) | B2_DBA_S | B2_DBA_IND_BG_FG);
-	if (info->fix.visual == FB_VISUAL_PSEUDOCOLOR) {
-		visfx_writel(info, B2_IPM, 0xff);
-		visfx_writel(info, B2_BPM, 0xff);
-	} else {
-		visfx_writel(info, B2_BPM, 0xffffffff);
-	}
-	visfx_set_bmove_color(info, fg_color, bg_color);
+	/* extend color to all relevant bytes for 8bpp visuals */
+	if (info->fix.visual == FB_VISUAL_PSEUDOCOLOR)
+		visfx_set_bmove_color(info, 0x01010101 * fg_color, 0x01010101 * bg_color);
+	else
+		visfx_set_bmove_color(info, fg_color, bg_color);
+	visfx_writel(info, B2_IPM, 0xffffffff);  // required in 8bpp too !!
+	visfx_writel(info, B2_BPM, 0xffffffff);
 
 	for (x = 0, _width = width; _width > 0; _width -= 32, x += 4) {
 		visfx_set_vram_addr(info, dx + x * 8, dy);
 		if (_width >= 32)
 			visfx_copyline(info, data, x, width, height, 4);
 		else {
-			visfx_writel(info, B2_BPM, GENMASK(31, 31 - _width));
+			visfx_writel(info, B2_BPM, GENMASK(31, 31 - _width + 1));
 			visfx_copyline(info, data, x, width, height, LINESIZE(_width));
 		}
 	}
@@ -942,10 +942,6 @@ static void visfx_imageblit(struct fb_info *info, const struct fb_image *image)
 
 	switch (image->depth) {
 	case 1:
-		/* visfx_imageblit_mono doesn't work yet for 8bpp */
-		if (info->fix.visual == FB_VISUAL_PSEUDOCOLOR)
-			return cfb_imageblit(info, image);
-
 		visfx_imageblit_mono(info, image->data, image->dx, image->dy,
 				     image->width, image->height,
 				     image->fg_color, image->bg_color);
