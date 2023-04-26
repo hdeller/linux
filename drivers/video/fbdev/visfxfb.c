@@ -1060,7 +1060,7 @@ static int visfx_blank(int blank_mode, struct fb_info *info)
 	return 0;
 }
 
-int visfx_sync(struct fb_info *info)
+static int visfx_sync(struct fb_info *info)
 {
 	visfx_wait_write_pipe_empty(info);
 	return 0;
@@ -1209,6 +1209,9 @@ static int visfx_check_var(struct fb_var_screeninfo *var, struct fb_info *info)
 		var->xres > 2048 ||
 		var->yres > 2048)
 		return -EINVAL;
+
+	if ((var->vmode & FB_VMODE_MASK) != FB_VMODE_NONINTERLACED)
+                return -EINVAL;
 
 	if (var->bits_per_pixel == 24)
 		var->bits_per_pixel = 32;
@@ -1526,6 +1529,7 @@ static void visfx_setup(struct fb_info *info)
 	visfx_writel(info, B2_TM_TSS, 0);
 	visfx_writel(info, B2_FCDA, 0);
 	visfx_writel(info, B2_BMAP_Z, 0);
+	visfx_writel(info, UB_CP, 0);
 	visfx_writel(info, B2_FSRMWB, 0);
 	visfx_readl(info, UB_CONTROL);
 	visfx_wait_write_pipe_empty(info);
@@ -1533,16 +1537,94 @@ static void visfx_setup(struct fb_info *info)
 	visfx_writel(info, UP_CF_STATE, 0x02000000);
 	visfx_writel(info, B2_VBS, 1);
 
-	par->abmap  = var->xres / 4;	/* x-resolution encoded in lower bits */
-	par->ibmap0 = 0x02681002;
+#define   DFA_FB_STRIDE_1k              0x00000000
+#define   DFA_FB_STRIDE_2k              0x00000010
+#define   DFA_FB_STRIDE_4k              0x00000020
+#define   DFA_PIX_8BIT                  0x00000000
+#define   DFA_PIX_16BIT_565             0x00000001
+#define   DFA_PIX_16BIT_1555            0x00000002
+#define   DFA_PIX_24BIT                 0x00000004
+#define   DFA_PIX_32BIT                 0x00000005
+
+#if 0
+typedef union { 
+    struct {
+        BITFIELD_7(
+        Uint32  BMAP    : 4,    
+        Uint32  Y       : 1,
+        Uint32  unused1 : 2,
+        Uint32  BA      : 13,
+        Uint32  unused2 : 6,
+        Uint32  BSF1    : 2,
+        Uint32  BSF2    : 4
+        )
+    } fields;
+    Uint32      bits;
+} AMAP_Type;
+typedef enum {
+    BMAP_1BPP   = 0,
+    BMAP_2BPP   = 1,
+    BMAP_4BPP   = 2
+} BmapRegionDepth;
+        
+typedef union { 
+    struct {
+        BITFIELD_4(
+        Uint32   BNO : 15,     // size^
+        Uint32   BS  : 12,	// start
+        Uint32   RT  : 3,
+        Uint32   RD  : 2
+        )
+    } fields;
+    Uint32      bits;
+} BMAP_Type;
+        
+#endif
+	par->abmap  = var->xres / 4;	/* x-resolution encoded in lower bits */  // or 0x20200
+	if (var->bits_per_pixel == 8) {
+		int blocks, bs;
+	//	par->ibmap0 = 0x02681000;
+	//	par->obmap0 = 0x23a84800; //  ab 0x800 geht alles !
+	//	par->abmap |= 0x20000;
+
+		bs = 4096;
+		blocks = VISFX_FB_LENGTH / 4096;
+		par->obmap0 =    0x02682000;
+		par->ibmap0 =    0xe3a80800;
+#if 0
+bei 24 bit:
+fx5_xinit_hpux.txt.decoded:   10933:  60.000 ns: MEMORY WRITE     B2_ABMAP                                                 20200 0
+fx5_xinit_hpux.txt.decoded:   24029:  60.000 ns: MEMORY WRITE     B2_IBMAP0                                              2680e02 0	134
+fx5_xinit_hpux.txt.decoded:   24071:  60.000 ns: MEMORY WRITE     B2_OBMAP0                                             23a80380 0	11d4
+fx5_xinit_hpux.txt.decoded:   24111:  60.000 ns: MEMORY WRITE     B2_IBMAP1                                             27d00e02 0
+#endif
+	} else {
+		par->ibmap0 =    0x02682002;
+		par->obmap0 =    0xe3a80800;
+	}
+printk("OBMAP %08x\n", par->obmap0);
+printk("IBMAP %08x\n", par->ibmap0);
 	par->bmap_z = 0x13090006;
-	par->obmap0 = 0x23a80000 | var->xres / 2;
 	par->ibmap1 = 0x27e00002;
+
+#if 0
+[   11.551846] visualizefx: B2_ABMAP value  00000140
+[   11.612700] visualizefx: B2_IBMAP0 value 01400280
+[   11.674528] visualizefx: B2_OBMAP0 value e00007c3
+[   11.736371] visualizefx: B2_OBMAP1 value c0000000
+[   11.798252] visualizefx: B2_DUM value    00000000
+[   11.856697] visualizefx: B2_OMC value    0f000087
+[   11.915147] visualizefx: B2_OTLS value   00030003
+[   11.974737] visualizefx: B2_OBS value    00000001
+mode "1280x1024-60"
+    # D: 108.085 MHz, H: 64.031 kHz, V: 60.067 Hz
+#endif
 
 	visfx_setup_and_wait(info, B2_ABMAP, par->abmap);
 	visfx_setup_and_wait(info, B2_IBMAP0, par->ibmap0);
 	visfx_setup_and_wait(info, B2_BMAP_Z, par->bmap_z);
 	visfx_setup_and_wait(info, B2_OBMAP0, par->obmap0);
+	visfx_setup_and_wait(info, B2_OBMAP1, par->obmap0);
 	visfx_setup_and_wait(info, UP_CF_STATE, 0);
 	visfx_setup_and_wait(info, B2_IBMAP1, par->ibmap1);
 	visfx_setup_and_wait(info, B2_DUM, 0x81030002);
@@ -1556,17 +1638,17 @@ static void visfx_setup(struct fb_info *info)
 
 	visfx_buffer_setup(info, 0, (var->bits_per_pixel == 32) ? 0x09000004 : 0x2000000, 0, 0);
 	visfx_buffer_setup(info, 1, (var->bits_per_pixel == 32) ? 0x09000004 : 0x2000000, 1, 0);
-	visfx_setup_and_wait(info, B2_OMC, 0x2000000);
+	visfx_setup_and_wait(info, B2_OMC, 0x2000000); // 0x0f000087); // 0x2000000);
 	visfx_writel(info, B2_OTLS, 2);
 	visfx_writel(info, B2_OBS, 0);
 
 	visfx_wclip(info, 0, 0, var->xres, var->yres);
-	visfx_clear_buffer(info, 0x05000880, par->ibmap0, 0x03f00000, 0);
+	visfx_clear_buffer(info, 0x05000880, par->ibmap0, 0x03f00000, (var->bits_per_pixel == 8) ?  0xffffffff : 0);
 	visfx_clear_buffer(info, 0x05000880, par->obmap0, 0x00fc0000, (var->bits_per_pixel == 32) ? 0xffffffff : 0);
 	visfx_clear_buffer(info, 0x05000880, par->abmap,  0x00900000, 0);
 
 	visfx_writel(info, B2_FATTR, 0);
-	visfx_writel(info, B2_OTLS, (var->bits_per_pixel == 8) ? 0 : 0x10002);
+	visfx_writel(info, B2_OTLS, (var->bits_per_pixel == 8) ? 0x00000 : 0x10002); // XX
 	visfx_writel(info, B2_CKEY_HI, 0xffffff);
 	visfx_writel(info, B2_CKEY_LO, 0xffffff);
 
