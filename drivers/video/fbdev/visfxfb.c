@@ -790,6 +790,12 @@
 
 #define UB_CP_CURSOR_ENABLE	       0x80000000
 
+typedef enum {
+    BMAP_1BPP   = 0,
+    BMAP_2BPP   = 1,
+    BMAP_4BPP   = 2
+} BmapRegionDepth;
+
 
 static char *mode_option; /* empty means take video mode from ROM */
 
@@ -850,7 +856,7 @@ static int visfx_wait_write_pipe_empty(struct fb_info *info)
 	u32 status;
 	int i;
 
-	for(i = 0; i < 1000000; i++) {
+	for (i = 0; i < 1000000; i++) {
 		status = visfx_readl(info, UB_STATUS);
 		// this fails on FX-10
 		if (WARN_ON_ONCE(status & UB_STATUS_FAULT))
@@ -930,7 +936,7 @@ static void visfx_imageblit_mono(struct fb_info *info, const char *data, int dx,
 			visfx_copyline(info, data, x, width, height, LINESIZE(_width));
 		}
 	}
-	visfx_writel(info, B2_IPM, 0xffffffff);
+	visfx_writel(info, B2_BPM, 0xffffffff);
 }
 
 static void visfx_imageblit(struct fb_info *info, const struct fb_image *image)
@@ -938,7 +944,8 @@ static void visfx_imageblit(struct fb_info *info, const struct fb_image *image)
 	struct visfx_par *par = info->par;
 	int x, y;
 
-	visfx_wait_write_pipe_empty(info);
+	if (visfx_wait_write_pipe_empty(info))
+		return;
 
 	switch (image->depth) {
 	case 1:
@@ -1494,7 +1501,8 @@ static void visfx_setup(struct fb_info *info)
 	struct fb_var_screeninfo *var = &info->var;
 	int i;
 
-	visfx_wait_write_pipe_empty(info);
+	if (visfx_wait_write_pipe_empty(info))
+		return;
 
 #ifdef __BIG_ENDIAN
 	if (var->bits_per_pixel == 32) {
@@ -1532,75 +1540,23 @@ static void visfx_setup(struct fb_info *info)
 	visfx_writel(info, UB_CP, 0);
 	visfx_writel(info, B2_FSRMWB, 0);
 	visfx_readl(info, UB_CONTROL);
-	visfx_wait_write_pipe_empty(info);
+	if (visfx_wait_write_pipe_empty(info))
+		return;
 
 	visfx_writel(info, UP_CF_STATE, 0x02000000);
 	visfx_writel(info, B2_VBS, 1);
 
-#define   DFA_FB_STRIDE_1k              0x00000000
-#define   DFA_FB_STRIDE_2k              0x00000010
-#define   DFA_FB_STRIDE_4k              0x00000020
-#define   DFA_PIX_8BIT                  0x00000000
-#define   DFA_PIX_16BIT_565             0x00000001
-#define   DFA_PIX_16BIT_1555            0x00000002
-#define   DFA_PIX_24BIT                 0x00000004
-#define   DFA_PIX_32BIT                 0x00000005
+	info->fix.accel = FB_ACCEL_NONE;
+	info->fix.type = FB_TYPE_PACKED_PIXELS;
+	info->fix.line_length = 2048 * var->bits_per_pixel / 8;
 
-#if 0
-typedef union { 
-    struct {
-        BITFIELD_7(
-        Uint32  BMAP    : 4,    
-        Uint32  Y       : 1,
-        Uint32  unused1 : 2,
-        Uint32  BA      : 13,
-        Uint32  unused2 : 6,
-        Uint32  BSF1    : 2,
-        Uint32  BSF2    : 4
-        )
-    } fields;
-    Uint32      bits;
-} AMAP_Type;
-typedef enum {
-    BMAP_1BPP   = 0,
-    BMAP_2BPP   = 1,
-    BMAP_4BPP   = 2
-} BmapRegionDepth;
-        
-typedef union { 
-    struct {
-        BITFIELD_4(
-        Uint32   BNO : 15,     // size^
-        Uint32   BS  : 12,	// start
-        Uint32   RT  : 3,
-        Uint32   RD  : 2
-        )
-    } fields;
-    Uint32      bits;
-} BMAP_Type;
-        
-#endif
 	par->abmap  = var->xres / 4;	/* x-resolution encoded in lower bits */  // or 0x20200
 	if (var->bits_per_pixel == 8) {
-		int blocks, bs;
-	//	par->ibmap0 = 0x02681000;
-	//	par->obmap0 = 0x23a84800; //  ab 0x800 geht alles !
-	//	par->abmap |= 0x20000;
-
-		bs = 4096;
-		blocks = VISFX_FB_LENGTH / 4096;
-		par->obmap0 =    0x02682000;
-		par->ibmap0 =    0xe3a80800;
-#if 0
-bei 24 bit:
-fx5_xinit_hpux.txt.decoded:   10933:  60.000 ns: MEMORY WRITE     B2_ABMAP                                                 20200 0
-fx5_xinit_hpux.txt.decoded:   24029:  60.000 ns: MEMORY WRITE     B2_IBMAP0                                              2680e02 0	134
-fx5_xinit_hpux.txt.decoded:   24071:  60.000 ns: MEMORY WRITE     B2_OBMAP0                                             23a80380 0	11d4
-fx5_xinit_hpux.txt.decoded:   24111:  60.000 ns: MEMORY WRITE     B2_IBMAP1                                             27d00e02 0
-#endif
+		par->obmap0 =    0x23a84800 | BMAP_1BPP;
+		par->ibmap0 =    0xe3a80800 | BMAP_1BPP;
 	} else {
-		par->ibmap0 =    0x02682002;
-		par->obmap0 =    0xe3a80800;
+		par->ibmap0 =    0x02682000 | BMAP_4BPP;
+		par->obmap0 =    0xe3a80800 | BMAP_1BPP;
 	}
 printk("OBMAP %08x\n", par->obmap0);
 printk("IBMAP %08x\n", par->ibmap0);
@@ -1660,12 +1616,9 @@ mode "1280x1024-60"
 	// visfx_clear_buffer(info, 0x00000a00, par->ibmap0, 0x03f00000, 0);
 	visfx_buffer_setup(info, 2, 0x08000084, 0, 0);
 
-	visfx_wait_write_pipe_empty(info);
+	if (visfx_wait_write_pipe_empty(info))
+		return;
 	visfx_writel(info, B2_BMAP_DBA, par->ibmap0);
-
-	info->fix.accel = FB_ACCEL_NONE;
-	info->fix.type = FB_TYPE_PACKED_PIXELS;
-	info->fix.line_length = 2048 * var->bits_per_pixel / 8;
 
 	switch (var->bits_per_pixel) {
 	default:
@@ -1700,14 +1653,12 @@ mode "1280x1024-60"
 		visfx_writel(info, B2_EN2D, B2_EN2D_WORD_MODE);
 		par->dba = B2_DBA_BIN8F | B2_DBA_OTC01 | B2_DBA_DIRECT | B2_DBA_D;
 		par->bmap_dba = par->ibmap0;
-		visfx_writel(info, B2_BPM, 0xffffffff);
 		visfx_writel(info, B2_OTR, 1<<16 | 1<<8 | 0);
 		visfx_writel(info, B2_FATTR, 0);
 	} else { /* 8-bit indexed: */
 		visfx_writel(info, B2_EN2D, B2_EN2D_BYTE_MODE);
 		par->dba = B2_DBA_BIN8I | B2_DBA_OTC04 | B2_DBA_DIRECT | B2_DBA_D;
 		par->bmap_dba = par->obmap0;
-		visfx_writel(info, B2_BPM, 0xff << 24);
 		visfx_writel(info, B2_OTR, 2);
 		visfx_writel(info, B2_CFS16, 0x40);
 		visfx_writel(info, B2_FATTR, 1<<7 | 1<<4); /* CFS16 & force Overlay */
@@ -1716,6 +1667,7 @@ mode "1280x1024-60"
 	visfx_writel(info, B2_BMAP_BABoth, par->bmap_dba);
 	visfx_writel(info, B2_BABoth, par->dba);
 	visfx_writel(info, B2_IPM, 0xffffffff);
+	visfx_writel(info, B2_BPM, 0xffffffff);
 }
 
 static int __init visfx_initialize(struct fb_info *info)
@@ -1731,8 +1683,10 @@ static int __init visfx_initialize(struct fb_info *info)
 
 	visfx_bus_error_timer_enable(info, false);
 	ret = visfx_reset(info);
-	if (ret)
+	if (ret) {
+		pr_warn("visfx: Failed to reset card (error %d)\n", ret);
 		return ret;
+	}
 	visfx_bus_error_timer_enable(info, true);
 
 	ret = visfx_init_pll(info, B2_PLL_CORE_CTL,
@@ -1862,6 +1816,7 @@ static int __init visfx_init_device(struct pci_dev *pdev, struct sti_struct *sti
 	struct visfx_par *par;
 	struct fb_info *info;
 	char mode[64];
+	u32 fpr;
 	int ret;
 
 	info = framebuffer_alloc(sizeof(struct visfx_par), &pdev->dev);
@@ -1921,12 +1876,19 @@ static int __init visfx_init_device(struct pci_dev *pdev, struct sti_struct *sti
 		info->fix.id,
 		info->fix.mmio_start);
 
+	fpr = visfx_readl(info, B2_FPR);
+	pr_info("visfx: FPR chip rev %d, %s display mode.\n",
+		fpr & 0xf, fpr & BIT(30) ? "Dual":"Single");
+
 	return 0;
 
 err_out_dealloc_cmap:
 	fb_dealloc_cmap(&info->cmap);
 err_out_free:
 	framebuffer_release(info);
+	if (sti)
+		pci_iounmap(pdev, par->reg_base);
+	pci_set_drvdata(pdev, NULL);
 	return ret;
 }
 
@@ -1936,16 +1898,12 @@ static int visfx_probe_pci(struct pci_dev *pdev,
 	int ret;
 
 	ret = pcim_enable_device(pdev);
-	if (ret) {
-		dev_err(&pdev->dev, "Cannot enable PCI device: %d\n", ret);
+	if (ret)
 		return ret;
-	}
 
 	ret = pcim_iomap_regions(pdev, BIT(0), KBUILD_MODNAME);
-	if (ret) {
-		dev_err(&pdev->dev, "Cannot map PCI resources: %d\n", ret);
+	if (ret)
 		return ret;
-	}
 
 	return visfx_init_device(pdev, NULL);
 }
@@ -1965,11 +1923,14 @@ static void visfx_probe_sti(struct sti_struct *sti, int enable)
 		struct visfx_par *par;
 
 		info = pci_get_drvdata(sti->pd);
-		par = info->par;
-		unregister_framebuffer(info);
-		fb_dealloc_cmap(&info->cmap);
-		framebuffer_release(info);
+		if (info) {
+			par = info->par;
+			unregister_framebuffer(info);
+			fb_dealloc_cmap(&info->cmap);
+			framebuffer_release(info);
+		}
 		pci_iounmap(sti->pd, par->reg_base);
+		pci_set_drvdata(sti->pd, NULL);
 	}
 }
 
