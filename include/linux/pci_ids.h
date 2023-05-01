@@ -776,6 +776,20 @@
 #define PCI_DEVICE_ID_HP_VISUALIZE_FX6	0x1006
 #define PCI_DEVICE_ID_HP_VISUALIZE_FX4	0x1008
 #define PCI_DEVICE_ID_HP_VISUALIZE_FX2	0x100a
+#if 0
+60:04.0 3D controller [0302]: Hewlett-Packard Company Visualize FXe [103c:108b] (rev 03)
+        Subsystem: Hewlett-Packard Company Visualize FXe [103c:108c]
+        Flags: bus master, 66MHz, medium devsel, latency 128, IRQ 73
+        Memory at ffffffffb3000000 (64-bit, prefetchable) [size=16M]
+        Memory at ffffffffb2000000 (64-bit, non-prefetchable) [size=16M]
+        Expansion ROM at ffffffffb4280000 [size=128K]
+
+60:06.0 Display controller [0380]: Hewlett-Packard Company Visualize FX [103c:1008] (rev 02)
+        Flags: bus master, 66MHz, medium devsel, latency 128
+        Memory at ffffffffb0000000 (64-bit, non-prefetchable) [size=32M]
+        Expansion ROM at ffffffffb4000000 [size=2M]
+#endif
+
 #define PCI_DEVICE_ID_HP_TACHYON	0x1028
 #define PCI_DEVICE_ID_HP_TACHLITE	0x1029
 #define PCI_DEVICE_ID_HP_J2585A		0x1030

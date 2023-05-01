@@ -822,8 +822,10 @@ struct visfx_par {
 	u32 abmap, ibmap0, bmap_z, ibmap1, obmap0;
 	u32 dba, bmap_dba;
 	u32 pseudo_palette[16];
-	struct visfx_default *defaults;
 	struct device *dev;
+	void __iomem *rom_base;
+	size_t rom_size;
+	struct visfx_default defaults;
 
 	struct fb_info *info;
 };
@@ -843,6 +845,18 @@ static void visfx_writel(struct fb_info *info, int reg, u32 val)
 
 	return writel(cpu_to_le32(val), par->reg_base + reg);
 }
+
+static u32 visfx_readl_rom(struct fb_info *info, int offset)
+{
+	struct visfx_par *par = info->par;
+	//u32 val;
+
+	return le32_to_cpu(readl(par->rom_base + offset));
+	// val = *(u32 *)(par->rom_base + offset);
+	// return le32_to_cpu(val);
+	// return ioread32(par->rom_base + offset);
+}
+
 
 static void visfx_write_vram(struct fb_info *info, int reg, u32 val)
 {
@@ -1676,10 +1690,10 @@ static int __init visfx_initialize(struct fb_info *info)
 	int i, ret;
 
 	pr_info("visfx: PLL: %08x:%08x, RAM: %08x:%08x, CB: %08x:%08x, GA: %08x:%08x\n",
-		par->defaults->pll_core_0, par->defaults->pll_core_1,
-		par->defaults->pll_ram_0, par->defaults->pll_ram_1,
-		par->defaults->pll_cb4038_0, par->defaults->pll_cb4038_1,
-		par->defaults->pll_ga_ipll_0, par->defaults->pll_ga_ipll_1);
+		par->defaults.pll_core_0, par->defaults.pll_core_1,
+		par->defaults.pll_ram_0, par->defaults.pll_ram_1,
+		par->defaults.pll_cb4038_0, par->defaults.pll_cb4038_1,
+		par->defaults.pll_ga_ipll_0, par->defaults.pll_ga_ipll_1);
 
 	visfx_bus_error_timer_enable(info, false);
 	ret = visfx_reset(info);
@@ -1690,14 +1704,14 @@ static int __init visfx_initialize(struct fb_info *info)
 	visfx_bus_error_timer_enable(info, true);
 
 	ret = visfx_init_pll(info, B2_PLL_CORE_CTL,
-			     par->defaults->pll_core_0,
-			     par->defaults->pll_core_1);
+			     par->defaults.pll_core_0,
+			     par->defaults.pll_core_1);
 	if (ret)
 		return ret;
 
 	ret = visfx_init_pll(info, B2_PLL_RAM_CTL,
-			     par->defaults->pll_ram_0,
-			     par->defaults->pll_ram_1);
+			     par->defaults.pll_ram_0,
+			     par->defaults.pll_ram_1);
 	if (ret)
 		return ret;
 
@@ -1707,8 +1721,8 @@ static int __init visfx_initialize(struct fb_info *info)
 	visfx_writel(info, B2_RC_CONFIG1, 0xE3901212);
 
 	ret = visfx_init_pll(info, 0xcb4038,
-			     par->defaults->pll_cb4038_0,
-			     par->defaults->pll_cb4038_1);
+			     par->defaults.pll_cb4038_0,
+			     par->defaults.pll_cb4038_1);
 	if (ret)
 		return ret;
 
@@ -1716,8 +1730,8 @@ static int __init visfx_initialize(struct fb_info *info)
 		visfx_writel(info, B3_GA_NOP_EOC, 0);
 
 	ret = visfx_init_pll(info, B3_GA_IPLL,
-			     par->defaults->pll_ga_ipll_0,
-			     par->defaults->pll_ga_ipll_1);
+			     par->defaults.pll_ga_ipll_0,
+			     par->defaults.pll_ga_ipll_1);
 	if (ret)
 		return ret;
 
@@ -1761,30 +1775,41 @@ static int __init visfx_get_rom_defaults(struct fb_info *info)
 {
 	struct visfx_par *par = info->par;
 	u32 offset, id;
+	u32 *ptr, len;
 
-	if (visfx_readl(info, 0) != 0x55aa0000)
+printk("rom1i  %08x\n", visfx_readl_rom(info, 0));
+	if (visfx_readl_rom(info, 0) != 0x55aa0000)
 		return -EINVAL;
 
-	offset = le32_to_cpu(visfx_readl(info, 0x08)) + 0x08;
-	if (offset > par->reg_size)
-		return -EINVAL;
+	offset = le32_to_cpu(visfx_readl_rom(info, 0x08)) + 0x08;
+printk("rom2 offset_size = %08x\n", offset);
+//	if (offset > par->rom_size)
+//		return -EINVAL;
 
-	id = visfx_readl(info, offset);
-
-	if (id != VISFX_CARDTYPE_FX5) {
+printk("rom3\n");
+	id = visfx_readl_rom(info, offset);
+	if (id != VISFX_CARDTYPE_FX5 && id != CRT_ID_PINNACLE) {
 		dev_err(par->dev, "Unsupported card: ID %08x\n", id);
 		return -EINVAL;
 	}
 
-	offset = le32_to_cpu(visfx_readl(info, 0x08)) + 0x28;
-	if (offset > par->reg_size)
+printk("ca\n");
+	offset = le32_to_cpu(visfx_readl_rom(info, 0x08)) + 0x28;
+	if (offset > par->rom_size)
 		return -EINVAL;
 
-	offset = visfx_readl(info, offset);
-	if (offset > par->reg_size)
+printk("ca\n");
+	offset = visfx_readl_rom(info, offset);
+	if (offset > par->rom_size)
 		return -EINVAL;
 
-	par->defaults = par->reg_base + offset;
+	/* copy table from ROM */
+	len = sizeof(par->defaults) / sizeof(u32);
+	ptr = &par->defaults;
+	while (len >= 0) {
+		ptr[len] = visfx_readl_rom(info, len);
+		len--;
+	}
 	return 0;
 }
 
@@ -1829,30 +1854,54 @@ static int __init visfx_init_device(struct pci_dev *pdev, struct sti_struct *sti
 	par->reg_size = pci_resource_len(pdev, 0);
 	par->dev = &pdev->dev;
 
+#if 0
+[   14.402172] visfxfb 0000:60:06.0: enabling SERR and PARITY (0046 -> 0146)
+[   14.493842] PROBE
+[   14.517828] PROBE-regs
+[   14.561893] PROBE-weit
+[   14.593838] aa   regbase = 0000000010280000,   0000000000000000
+[   14.669830] rom1  ff010002
+[   14.705817] ba
+[   14.725840] visfxfb: probe of 0000:60:06.0 failed with error -22
+#endif
+
+	pci_enable_rom(pdev);
+	par->rom_base = pci_map_rom(pdev, &par->rom_size);
+printk("1111 rom base/size %px   %zx\n", par->rom_base, par->rom_size);
+	ret = visfx_get_rom_defaults(info);
+	pci_unmap_rom(pdev, par->rom_base);
+	pci_disable_rom(pdev);
+printk("ba\n");
+	if (ret)
+		goto err_out_free;
+printk("ca\n");
+
 	if (sti) {
 		sti->info = info;
 		par->reg_base = pci_iomap(pdev, 0, VISFX_FB_OFFSET + VISFX_FB_LENGTH);
-	} else
+	} else {
 		par->reg_base = pcim_iomap_table(pdev)[0];
+	}
 
-	ret = visfx_get_rom_defaults(info);
-	if (ret)
-		goto err_out_free;
+printk("aa   regbase = %px,   %px\n", par->reg_base,  sti);
 
 	visfx_setup_info(pdev, info);
 	if (sti)
 		strscpy(info->fix.id, sti->sti_data->inq_outptr.dev_name,
 			sizeof(info->fix.id));
 
+printk("da\n");
 	ret = visfx_initialize(info);
 	if (ret)
 		goto err_out_free;
 
+printk("ea\n");
 	info->var.bits_per_pixel = DEFAULT_BPP;
 	ret = fb_alloc_cmap(&info->cmap, 256, 0);
 	if (ret)
 		goto err_out_free;
 
+printk("aa\n");
 	visfx_get_video_mode(info);
 
 	if (!mode_option) {
@@ -1898,12 +1947,15 @@ static int visfx_probe_pci(struct pci_dev *pdev,
 	int ret;
 
 	ret = pcim_enable_device(pdev);
+printk("PROBE\n");
 	if (ret)
 		return ret;
 
+printk("PROBE-regs\n");
 	ret = pcim_iomap_regions(pdev, BIT(0), KBUILD_MODNAME);
 	if (ret)
 		return ret;
+printk("PROBE-weit\n");
 
 	return visfx_init_device(pdev, NULL);
 }
@@ -1913,7 +1965,8 @@ static void visfx_probe_sti(struct sti_struct *sti, int enable)
 	if (!sti || !sti->pd)
 		return;
 
-	if (sti->graphics_id[0] != VISFX_CARDTYPE_FX5)
+	if (sti->graphics_id[0] != VISFX_CARDTYPE_FX5 &&
+	    sti->graphics_id[0] != CRT_ID_PINNACLE)
 		return;
 
 	if (enable)
@@ -1954,7 +2007,8 @@ static void __exit visfx_remove(struct pci_dev *pdev)
 }
 
 static const struct pci_device_id visfx_pci_tbl[] = {
-	{ PCI_DEVICE(PCI_VENDOR_ID_HP, PCI_DEVICE_ID_HP_VISUALIZE_FX4) },
+//	{ PCI_DEVICE(PCI_VENDOR_ID_HP, PCI_DEVICE_ID_HP_VISUALIZE_FX4) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_HP, PCI_DEVICE_ID_HP_VISUALIZE_FXE) },
 	{ 0 },
 };
 MODULE_DEVICE_TABLE(pci, visfx_pci_tbl);
