@@ -1390,16 +1390,23 @@ int pdc_iodc_getc(void)
 
 int pdc_sti_call(unsigned long func, unsigned long flags,
                  unsigned long inptr, unsigned long outputr,
-                 unsigned long glob_cfg)
+                 unsigned long glob_cfg, int sti_call_64bit)
 {
-        int retval;
+	int retval;
 	unsigned long irqflags;
 
-        spin_lock_irqsave(&pdc_lock, irqflags);  
-        retval = real32_call(func, flags, inptr, outputr, glob_cfg);
-        spin_unlock_irqrestore(&pdc_lock, irqflags);
+	spin_lock_irqsave(&pdc_lock, irqflags);
+	if (IS_ENABLED(CONFIG_64BIT) && sti_call_64bit) {
+#ifdef CONFIG_64BIT
+		retval = real64_call(func, flags, inptr, outputr, glob_cfg);
+#else
+		BUG();
+#endif
+	} else
+		retval = real32_call(func, flags, inptr, outputr, glob_cfg);
+	spin_unlock_irqrestore(&pdc_lock, irqflags);
 
-        return retval;
+	return retval;
 }
 EXPORT_SYMBOL(pdc_sti_call);
 
