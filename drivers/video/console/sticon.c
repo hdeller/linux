@@ -386,8 +386,7 @@ static int __init sticonsole_init(void)
     if (sticon_sti)
 	 return 0;
 
-    /* find all STI roms and get default */
-    sticon_sti = sti_get_rom(0); // XXX
+    sticon_sti = sti_get_rom(0);
     if (!sticon_sti)
 	return -ENODEV;
 

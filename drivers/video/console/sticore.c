@@ -23,7 +23,6 @@
 #include <linux/init.h>
 #include <linux/pci.h>
 #include <linux/font.h>
-#include <linux/delay.h>
 
 #include <asm/hardware.h>
 #include <asm/page.h>
@@ -99,7 +98,6 @@ static const struct sti_init_flags default_init_flags = {
 	.no_chg_bet = 1, 
 	.no_chg_bei = 1, 
 	.init_cmap_tx = 1,
-	//.caller_kernel = 1,
 };
 
 static int sti_init_graph(struct sti_struct *sti)
@@ -146,17 +144,14 @@ static void sti_inq_conf(struct sti_struct *sti)
 	unsigned long flags;
 	s32 ret;
 
-	printk("attr %px\n", &outptr->attributes);
-	printk("attr %px\n", &outptr->ext_ptr);
+	store_sti_ptr(sti, &outptr->ext_ptr, &sti->sti_data->inq_outptr_ext);
+
 	do {
-		printk("0000000000000000\n");
-		store_sti_ptr(sti, &outptr->ext_ptr, &sti->sti_data->inq_outptr_ext);
 		spin_lock_irqsave(&sti->lock, flags);
 		memset(inptr, 0, sizeof(*inptr));
 		ret = sti_call(sti, sti->inq_conf, &default_conf_flags,
 			inptr, outptr, sti->glob_cfg);
 		spin_unlock_irqrestore(&sti->lock, flags);
-		printk("111111111111111111111\n");
 	} while (ret == 1);
 }
 
@@ -420,7 +415,7 @@ static void sti_dump_globcfg(struct sti_struct *sti)
 	struct sti_glob_cfg *glob_cfg = sti->glob_cfg;
 	struct sti_glob_cfg_ext *cfg = &sti->sti_data->glob_cfg_ext;
 
-	printk("%d text planes\n"
+	pr_debug("%d text planes\n"
 		"%4d x %4d screen resolution\n"
 		"%4d x %4d offscreen\n"
 		"%4d x %4d layout\n",
@@ -430,7 +425,7 @@ static void sti_dump_globcfg(struct sti_struct *sti)
 		glob_cfg->total_x, glob_cfg->total_y);
 
 	/* dump extended cfg */ 
-	printk("monitor %d\n"
+	pr_debug("monitor %d\n"
 		"in friendly mode: %d\n"
 		"power consumption %d watts\n"
 		"freq ref %d\n"
@@ -444,7 +439,7 @@ static void sti_dump_globcfg(struct sti_struct *sti)
 
 static void sti_dump_outptr(struct sti_struct *sti)
 {
-	printk("%d bits per pixel\n"
+	pr_debug("%d bits per pixel\n"
 		"%d used bits\n"
 		"%d planes\n"
 		"attributes %08x\n",
@@ -459,9 +454,8 @@ static int sti_init_glob_cfg(struct sti_struct *sti, unsigned long rom_address,
 {
 	struct sti_glob_cfg *glob_cfg;
 	struct sti_glob_cfg_ext *glob_cfg_ext;
-	void *save_addr;
+	void *save_addr, *ptr;
 	void *sti_mem_addr;
-	void *ptr;
 	int i, size;
 
 	if (sti->sti_mem_request < 256)
@@ -502,7 +496,7 @@ static int sti_init_glob_cfg(struct sti_struct *sti, unsigned long rom_address,
 		
 		len = sti->regions[i].region_desc.length * 4096;
 		
-		printk("region #%d: phys %08lx, len=%lukB, "
+		pr_debug("region #%d: phys %08lx, len=%lukB, "
 			 "btlb=%d, sysonly=%d, cache=%d, last=%d\n",
 			i, sti->regions_phys[i], len/1024,
 			sti->regions[i].region_desc.btlb,
@@ -518,7 +512,6 @@ static int sti_init_glob_cfg(struct sti_struct *sti, unsigned long rom_address,
 	ptr = &glob_cfg->region_ptrs;
 	for (i = 0; i < STI_REGION_MAX; i++) {
 		ptr = store_sti_val(sti, ptr, sti->regions_phys[i]);
-		printk("new reg   %lx\n", sti->regions_phys[i]);
 	}
 
 	*(s32 *)ptr = 0;	/* set reent_lvl */
@@ -879,7 +872,7 @@ static int sti_read_rom(int wordmode, struct sti_struct *sti,
 		(IS_ENABLED(CONFIG_64BIT) && sti->sti_call_64bit) ? 64:32);
 
 	sti->sti_mem_request = raw->sti_mem_req;
-	pr_info(" mem_request = %d,  reentsize %d\n",
+	pr_debug("    mem_request = %d,  reentsize %d\n",
 		sti->sti_mem_request, raw->reentsize);
 
 	sti->graphics_id[0] = raw->graphics_id[0];
@@ -943,9 +936,9 @@ test_rom:
 	 * to read the hpa is okay, for romless sti. The pdc_add_valid check
 	 * fails on machines which support 64-bit only. */
 
-	if ((!IS_ENABLED(CONFIG_64BIT) || (boot_cpu_data.pdc.capabilities & PDC_MODEL_OS32)) &&
-		pdc_add_valid(address)) {
-		printk("4444444444444i pdc_add_valid failed\n"); 
+	if ((!IS_ENABLED(CONFIG_64BIT) ||
+	     (boot_cpu_data.pdc.capabilities & PDC_MODEL_OS32)) &&
+	    pdc_add_valid(address)) {
 		goto out_err;
 	}
 
@@ -966,7 +959,7 @@ test_rom:
 		sti->pd = pd;
 
 		i = gsc_readl(address+0x0c);
-		printk("PCI ROM size (from header) = %d kB\n",
+		pr_debug("PCI ROM size (from header) = %d kB\n",
 			le16_to_cpu(i>>16)*512/1024);
 		rm_offset = le16_to_cpu(i & 0xffff);
 		if (rm_offset) { 
@@ -979,20 +972,20 @@ test_rom:
 		}
 
 		address += le32_to_cpu(gsc_readl(address+8));
-		printk("sig %04x, PCI STI ROM at %08lx\n", sig, address);
+		pr_debug("sig %04x, PCI STI ROM at %08lx\n", sig, address);
 		goto test_rom;
 	}
 	
 	ok = 0;
 	
 	if ((sig & 0xff) == 0x01) {
-		printk("    byte mode ROM at %08lx, hpa at %08lx\n",
+		pr_debug("    byte mode ROM at %08lx, hpa at %08lx\n",
 		       address, hpa);
 		ok = sti_read_rom(0, sti, address);
 	}
 
 	if ((sig & 0xffff) == 0x0303) {
-		printk("    word mode ROM at %08lx, hpa at %08lx\n",
+		pr_debug("    word mode ROM at %08lx, hpa at %08lx\n",
 		       address, hpa);
 		ok = sti_read_rom(1, sti, address);
 	}
@@ -1010,26 +1003,15 @@ test_rom:
 		unsigned long rom_base;
 		rom_base = pci_resource_start(sti->pd, PCI_ROM_RESOURCE);	
 		pci_write_config_dword(sti->pd, PCI_ROM_ADDRESS, rom_base & ~PCI_ROM_ADDRESS_ENABLE);
-		printk("STI PCI ROM disabled\n");
+		pr_debug("STI PCI ROM disabled\n");
 	}
 
-printk("aaaaaaaaaaa000\n");
 	if (sti_init_graph(sti))
 		goto out_err;
 
-printk("aaaaaaaaaaa\n");
-
-// if (hpa == 0xffffffffa1000000)
-//		goto out_err;
-
-	msleep(10000);
-
 	sti_inq_conf(sti);
-printk("aaaaaaaaaaa222\n");
-	msleep(10000);
 	sti_dump_globcfg(sti);
 	sti_dump_outptr(sti);
-printk("aaaaaaaaaaa333\n");
 	
 	pr_info("    graphics card name: %s\n",
 		sti->sti_data->inq_outptr.dev_name);
@@ -1040,7 +1022,6 @@ printk("aaaaaaaaaaa333\n");
 	return sti;
 
 out_err:
-	printk("out_err !!!!!!!!!!!!!!!!\n");
 	kfree(sti);
 	return NULL;
 }
@@ -1097,13 +1078,13 @@ static int sticore_pci_init(struct pci_dev *pd, const struct pci_device_id *ent)
 	rom_len = pci_resource_len(pd, PCI_ROM_RESOURCE);
 	if (rom_base) {
 		pci_write_config_dword(pd, PCI_ROM_ADDRESS, rom_base | PCI_ROM_ADDRESS_ENABLE);
-		printk("STI PCI ROM enabled at 0x%08lx\n", rom_base);
+		pr_debug("STI PCI ROM enabled at 0x%08lx\n", rom_base);
 	}
 
-	printk("STI PCI graphic ROM found at %08lx (%u kB), fb at %08lx (%u MB)\n",
+	pr_info("STI PCI graphic ROM found at %08lx (%u kB), fb at %08lx (%u MB)\n",
 		rom_base, rom_len/1024, fb_base, fb_len/1024/1024);
 
-	printk("Trying PCI STI ROM at %08lx, PCI hpa at %08lx\n",
+	pr_debug("Trying PCI STI ROM at %08lx, PCI hpa at %08lx\n",
 		    rom_base, fb_base);
 
 	sti = sti_try_rom_generic(rom_base, fb_base, pd);

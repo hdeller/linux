@@ -244,12 +244,10 @@ ENTRY_CFI(real64_call_asm)
 	std	%rp, -0x10(%sp)		/* save RP */
 	std	%sp, -8(%arg0)		/* save SP on real-mode stack */
 	copy	%arg0, %sp		/* adopt the real-mode SP */
+	copy	%arg1, %r29		/* get ap */
 
 	/* save fn */
 	copy	%arg2, %r31
-
-	/* set up the new ap */
-	ldo	64(%arg1), %r29
 
 	/* load up the arg registers from the saved arg area */
 	/* 32-bit calling convention passes first 4 args in registers */
@@ -262,7 +260,9 @@ ENTRY_CFI(real64_call_asm)
 	ldd	7*REG_SZ(%arg1), %r19
 	ldd	1*REG_SZ(%arg1), %arg1		/* do this one last! */
 
+	/* set up real-mode stack and real-mode ap */
 	tophys_r1 %sp
+	tophys_r1 %r29			/* Reference param save area */
 
 	b,l	rfi_virt2real,%r2
 	nop
