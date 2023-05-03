@@ -1805,7 +1805,7 @@ printk("ca\n");
 
 	/* copy table from ROM */
 	len = sizeof(par->defaults) / sizeof(u32);
-	ptr = &par->defaults;
+	ptr = (u32 *) &par->defaults;
 	while (len >= 0) {
 		ptr[len] = visfx_readl_rom(info, len);
 		len--;
@@ -1962,12 +1962,15 @@ printk("PROBE-weit\n");
 
 static void visfx_probe_sti(struct sti_struct *sti, int enable)
 {
+	printk("helge1  sti %px\n", sti);
 	if (!sti || !sti->pd)
 		return;
 
+	printk("helge1\n");
 	if (sti->graphics_id[0] != VISFX_CARDTYPE_FX5 &&
 	    sti->graphics_id[0] != CRT_ID_PINNACLE)
 		return;
+	printk("helge2\n");
 
 	if (enable)
 		visfx_init_device(sti->pd, sti);
@@ -2007,7 +2010,7 @@ static void __exit visfx_remove(struct pci_dev *pdev)
 }
 
 static const struct pci_device_id visfx_pci_tbl[] = {
-//	{ PCI_DEVICE(PCI_VENDOR_ID_HP, PCI_DEVICE_ID_HP_VISUALIZE_FX4) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_HP, PCI_DEVICE_ID_HP_VISUALIZE_FX4) },
 	{ PCI_DEVICE(PCI_VENDOR_ID_HP, PCI_DEVICE_ID_HP_VISUALIZE_FXE) },
 	{ 0 },
 };
