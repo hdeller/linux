@@ -244,7 +244,6 @@ ENTRY_CFI(real64_call_asm)
 	std	%rp, -0x10(%sp)		/* save RP */
 	std	%sp, -8(%arg0)		/* save SP on real-mode stack */
 	copy	%arg0, %sp		/* adopt the real-mode SP */
-	copy	%arg1, %r29		/* get ap */
 
 	/* save fn */
 	copy	%arg2, %r31
@@ -262,7 +261,7 @@ ENTRY_CFI(real64_call_asm)
 
 	/* set up real-mode stack and real-mode ap */
 	tophys_r1 %sp
-	tophys_r1 %r29			/* Reference param save area */
+	ldo	-16(%sp), %r29			/* Reference param save area */
 
 	b,l	rfi_virt2real,%r2
 	nop
