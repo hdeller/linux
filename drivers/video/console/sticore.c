@@ -4,7 +4,7 @@
  *	core code for console driver using HP's STI firmware
  *
  *	Copyright (C) 2000 Philipp Rumpf <prumpf@tux.org>
- *	Copyright (C) 2001-2020 Helge Deller <deller@gmx.de>
+ *	Copyright (C) 2001-2023 Helge Deller <deller@gmx.de>
  *	Copyright (C) 2001-2002 Thomas Bogendoerfer <tsbogend@alpha.franken.de>
  * 
  * TODO:
@@ -181,8 +181,7 @@ sti_putc(struct sti_struct *sti, int c, int y, int x,
 		spin_lock_irqsave(&sti->lock, flags);
 		inptr = &inptr_default;
 		if (IS_ENABLED(CONFIG_64BIT) && !sti->sti_call_64bit) {
-			/* copy data if calling 32bit functions on 64-bit
-			 * kernel */
+			/* use copy if calling 32-bit on LP64 kernel */
 			inptr = &sti->sti_data->font_inptr;
 			*inptr = inptr_default;
 			inptr = (void *)(((unsigned long)inptr) + sizeof(u32));
@@ -222,8 +221,7 @@ sti_set(struct sti_struct *sti, int src_y, int src_x,
 		spin_lock_irqsave(&sti->lock, flags);
 		inptr = &inptr_default;
 		if (IS_ENABLED(CONFIG_64BIT) && !sti->sti_call_64bit) {
-			/* copy data if calling 32bit functions on 64-bit
-			 * kernel */
+			/* use copy if calling 32-bit on LP64 kernel */
 			inptr = &sti->sti_data->blkmv_inptr;
 			*inptr = inptr_default;
 		}
@@ -256,8 +254,7 @@ sti_clear(struct sti_struct *sti, int src_y, int src_x,
 		spin_lock_irqsave(&sti->lock, flags);
 		inptr = &inptr_default;
 		if (IS_ENABLED(CONFIG_64BIT) && !sti->sti_call_64bit) {
-			/* copy data if calling 32bit functions on 64-bit
-			 * kernel */
+			/* use copy if calling 32-bit on LP64 kernel */
 			inptr = &sti->sti_data->blkmv_inptr;
 			*inptr = inptr_default;
 		}
@@ -293,8 +290,7 @@ sti_bmove(struct sti_struct *sti, int src_y, int src_x,
 		spin_lock_irqsave(&sti->lock, flags);
 		inptr = &inptr_default;
 		if (IS_ENABLED(CONFIG_64BIT) && !sti->sti_call_64bit) {
-			/* copy data if calling 32bit functions on 64-bit
-			 * kernel */
+			/* use copy if calling 32-bit on LP64 kernel */
 			inptr = &sti->sti_data->blkmv_inptr;
 			*inptr = inptr_default;
 		}
