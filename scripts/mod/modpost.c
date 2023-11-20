@@ -43,6 +43,10 @@ static bool ignore_missing_files;
 /* If set to 1, only warn (instead of error) about missing ns imports */
 static bool allow_missing_ns_imports;
 
+/* is target a 64-bit platform and has it prel32 relocation support? */
+static bool target_64bit;
+static bool target_prel32_relocations;
+
 static bool error_occurred;
 
 static bool extra_warn;
@@ -1493,6 +1497,76 @@ static void check_sec_ref(struct module *mod, struct elf_info *elf)
 	}
 }
 
+/**
+ * Check alignment of sections in modules.
+ **/
+static void check_sec_alignment(struct module *mod, struct elf_info *elf)
+{
+	/* sections that may use PREL32 relocations and only need 4-byte alignment */
+	static const char *const prel32_sec_list[] = {
+		"__tracepoints_ptrs",
+		"__ksymtab",
+		"__bug_table",
+		".smp_locks",
+		NULL
+	};
+	/* sections that are fine with any/1-byte alignment */
+	static const char *const byte_sec_list[] = {
+		".modinfo",
+		".init.ramfs",
+		NULL
+	};
+	/* sections with special alignment */
+	static struct { int align; const char *name; } const special_list[] = {
+		{ 64,	".rodata.cst2" },
+		{ 0,	NULL }
+	};
+
+	int i;
+
+	/* ignore vmlinux for now? */
+	// if (mod->is_vmlinux) return;
+
+	/* Walk through all sections */
+	for (i = 0; i < elf->num_sections; i++) {
+		Elf_Shdr *sechdr = &elf->sechdrs[i];
+		const char *sec = sech_name(elf, sechdr);
+		const char *modname = mod->name;
+		const int is_shalign = sechdr->sh_addralign;
+		int should_shalign;
+		int k;
+
+		/* ignore some sections */
+		if ((sechdr->sh_type == SHT_NULL) ||
+		    !(sechdr->sh_flags & SHF_ALLOC))
+			continue;
+
+		/* default alignment is 8 for 64-bit and 4 for 32-bit targets * */
+		should_shalign = target_64bit ? 8 : 4;
+		if (match(sec, prel32_sec_list))
+			should_shalign = target_prel32_relocations ? 4 : should_shalign;
+		else if (strstr(sec, "text")) /* assume text segments to be 4-byte aligned */
+			should_shalign = 4;
+		else if (match(sec, byte_sec_list)) /* any alignment is OK. */
+			continue;
+		else {
+			/* search in list with special alignment */
+			k = 0;
+			while (special_list[k].align && strstarts(sec, special_list[k].name)) {
+				should_shalign = special_list[k].align;
+				break;
+			}
+		}
+
+		if (is_shalign  >= should_shalign)
+			continue;
+
+		warn("%s: section %s (type %d, flags %lu) has alignment of %d, expected at least %d.\n"
+		     "Maybe you need to add ALIGN() to the modules.lds file (or fix modpost) ?\n",
+		     modname, sec, sechdr->sh_type, sechdr->sh_flags, is_shalign, should_shalign);
+	}
+}
+
 static char *remove_dot(char *s)
 {
 	size_t n = strcspn(s, ".");
@@ -1652,6 +1726,8 @@ static void read_symbols(const char *modname)
 		handle_symbol(mod, &info, sym, symname);
 		handle_moddevtable(mod, &info, sym, symname);
 	}
+
+	check_sec_alignment(mod, &info);
 
 	check_sec_ref(mod, &info);
 
@@ -2183,7 +2259,7 @@ int main(int argc, char **argv)
 	LIST_HEAD(dump_lists);
 	struct dump_list *dl, *dl2;
 
-	while ((opt = getopt(argc, argv, "ei:MmnT:to:au:WwENd:")) != -1) {
+	while ((opt = getopt(argc, argv, "ei:MmnT:to:au:WwENd:6R")) != -1) {
 		switch (opt) {
 		case 'e':
 			external_module = true;
@@ -2231,6 +2307,12 @@ int main(int argc, char **argv)
 			break;
 		case 'd':
 			missing_namespace_deps = optarg;
+			break;
+		case '6':
+			target_64bit = true;
+			break;
+		case 'R':
+			target_prel32_relocations = true;
 			break;
 		default:
 			exit(1);

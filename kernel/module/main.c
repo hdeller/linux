@@ -2277,6 +2277,10 @@ static int move_module(struct module *mod, struct load_info *info)
 				ret = -ENOEXEC;
 				goto out_enomem;
 			}
+			if (((uintptr_t)dest) & (BITS_PER_LONG/8 - 1)) {
+				printk("** WARNING **: \tmodule: %s, dest=0x%lx, section=%s possibly not correctly aligned.\n",
+					mod->name, (long)dest, info->secstrings + shdr->sh_name);
+			}
 			memcpy(dest, (void *)shdr->sh_addr, shdr->sh_size);
 		}
 		/*
