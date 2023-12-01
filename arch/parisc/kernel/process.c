@@ -206,12 +206,6 @@ copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
 	unsigned long tls = args->tls;
 	struct pt_regs *cregs = &(p->thread.regs);
 	void *stack = task_stack_page(p);
-	
-	/* We have to use void * instead of a function pointer, because
-	 * function pointers aren't a pointer to the function on 64-bit.
-	 * Make them const so the compiler knows they live in .text */
-	extern void * const ret_from_kernel_thread;
-	extern void * const child_return;
 
 	if (unlikely(args->fn)) {
 		/* kernel thread */
@@ -222,7 +216,7 @@ copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
 		 * to call schedule_tail()
 		 */
 		cregs->ksp = (unsigned long) stack + FRAME_SIZE + PT_SZ_ALGN;
-		cregs->kpc = (unsigned long) &ret_from_kernel_thread;
+		cregs->kpc = (unsigned long) dereference_kernel_function_descriptor(&ret_from_kernel_thread);
 		/*
 		 * Copy function and argument to be called from
 		 * ret_from_kernel_thread.

@@ -301,6 +301,17 @@ extern irqreturn_t ipi_interrupt(int, void *);
 extern void start_cpu_itimer(void);
 extern void handle_interruption(int, struct pt_regs *);
 
+/* in entry.S:
+ * We have to use void * instead of a function pointer, because function
+ * pointers aren't a pointer to the function on 64-bit.  Make them const so
+ * the compiler knows they live in .text */
+extern void * const ret_from_kernel_thread(void);
+extern void * const syscall_exit(void);
+extern void * const intr_return(void);
+extern void * const child_return(void);
+extern void * const _switch_to_ret(void);
+extern void * const _call_on_stack(void);
+
 /* called from assembly code: */
 extern void start_parisc(void);
 extern void smp_callin(unsigned long);

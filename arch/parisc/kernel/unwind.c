@@ -14,6 +14,7 @@
 #include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/sort.h>
+#include <linux/kallsyms.h>
 #include <linux/sched/task_stack.h>
 
 #include <linux/uaccess.h>
@@ -209,29 +210,19 @@ int __init unwind_init(void)
 
 static bool pc_is_kernel_fn(unsigned long pc, void *fn)
 {
-	return (unsigned long)dereference_kernel_function_descriptor(fn) == pc;
+	void *ptr = dereference_kernel_function_descriptor(fn);
+
+	/* sanity check for pointer address on 64-bit kernel */
+	if (unlikely(IS_ENABLED(CONFIG_64BIT) && !is_kernel_text((unsigned long) ptr))) {
+		pr_err_once("unwind_special has wrong address: %px\n", ptr);
+		return false;
+	}
+	return pc == (unsigned long) ptr;
 }
 
 static int unwind_special(struct unwind_frame_info *info, unsigned long pc, int frame_size)
 {
-	/*
-	 * We have to use void * instead of a function pointer, because
-	 * function pointers aren't a pointer to the function on 64-bit.
-	 * Make them const so the compiler knows they live in .text
-	 * Note: We could use dereference_kernel_function_descriptor()
-	 * instead but we want to keep it simple here.
-	 */
-	extern void * const ret_from_kernel_thread;
-	extern void * const syscall_exit;
-	extern void * const intr_return;
-	extern void * const _switch_to_ret;
-#ifdef CONFIG_IRQSTACKS
-	extern void * const _call_on_stack;
-#endif /* CONFIG_IRQSTACKS */
-	void *ptr;
-
-	ptr = dereference_kernel_function_descriptor(&handle_interruption);
-	if (pc_is_kernel_fn(pc, ptr)) {
+	if (pc_is_kernel_fn(pc, handle_interruption)) {
 		struct pt_regs *regs = (struct pt_regs *)(info->sp - frame_size - PT_SZ_ALGN);
 		dbg("Unwinding through handle_interruption()\n");
 		info->prev_sp = regs->gr[30];
@@ -239,13 +230,13 @@ static int unwind_special(struct unwind_frame_info *info, unsigned long pc, int 
 		return 1;
 	}
 
-	if (pc_is_kernel_fn(pc, ret_from_kernel_thread) ||
-	    pc_is_kernel_fn(pc, syscall_exit)) {
+	if (pc_is_kernel_fn(pc, &ret_from_kernel_thread) ||
+	    pc_is_kernel_fn(pc, &syscall_exit)) {
 		info->prev_sp = info->prev_ip = 0;
 		return 1;
 	}
 
-	if (pc_is_kernel_fn(pc, intr_return)) {
+	if (pc_is_kernel_fn(pc, &intr_return)) {
 		struct pt_regs *regs;
 
 		dbg("Found intr_return()\n");
@@ -257,14 +248,14 @@ static int unwind_special(struct unwind_frame_info *info, unsigned long pc, int 
 	}
 
 	if (pc_is_kernel_fn(pc, _switch_to) ||
-	    pc_is_kernel_fn(pc, _switch_to_ret)) {
+	    pc_is_kernel_fn(pc, &_switch_to_ret)) {
 		info->prev_sp = info->sp - CALLEE_SAVE_FRAME_SIZE;
 		info->prev_ip = *(unsigned long *)(info->prev_sp - RP_OFFSET);
 		return 1;
 	}
 
 #ifdef CONFIG_IRQSTACKS
-	if (pc_is_kernel_fn(pc, _call_on_stack)) {
+	if (pc_is_kernel_fn(pc, &_call_on_stack)) {
 		info->prev_sp = *(unsigned long *)(info->sp - FRAME_SIZE - REG_SZ);
 		info->prev_ip = *(unsigned long *)(info->sp - FRAME_SIZE - RP_OFFSET);
 		return 1;

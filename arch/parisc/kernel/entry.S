@@ -733,7 +733,7 @@ END(fault_vector_11)
 	 * copy_thread moved args into task save area.
 	 */
 
-ENTRY(ret_from_kernel_thread)
+ENTRY_CFI(ret_from_kernel_thread)
 	/* Call schedule_tail first though */
 	BL	schedule_tail, %r2
 	nop
@@ -748,7 +748,7 @@ ENTRY(ret_from_kernel_thread)
 	copy	%r31, %r2
 	b	finish_child_return
 	nop
-END(ret_from_kernel_thread)
+ENDPROC_CFI(ret_from_kernel_thread)
 
 
 	/*
