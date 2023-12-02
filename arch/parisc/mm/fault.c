@@ -281,6 +281,10 @@ void handle_page_fault(struct pt_regs *regs, unsigned long code,
 	if (user_mode(regs))
 		flags |= FAULT_FLAG_USER;
 
+	/* Enable interrupts if they were enabled in the parent context. */
+	if (!regs_irqs_disabled(regs))
+		local_irq_enable();
+
 	acc_type = parisc_acctyp(code, regs->iir);
 	if (acc_type & VM_WRITE)
 		flags |= FAULT_FLAG_WRITE;
