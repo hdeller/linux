@@ -16,6 +16,7 @@
 #include <linux/seq_file.h>
 #include <linux/types.h>
 #include <linux/sched/task_stack.h>
+#include <linux/entry-common.h>
 #include <asm/io.h>
 
 #include <asm/softirq_stack.h>
@@ -441,6 +442,7 @@ panic_check:
 #endif
 }
 
+
 #ifdef CONFIG_IRQSTACKS
 /* in entry.S: */
 void call_on_stack(unsigned long p1, void *func, unsigned long new_stack);
@@ -483,22 +485,19 @@ void do_softirq_own_stack(void)
 	execute_on_irq_stack(__do_softirq, 0);
 }
 #endif
+#define call_on_irq_stack(arg, fn)	execute_on_irq_stack(fn, (unsigned long) arg)
+#else
+#define call_on_irq_stack(arg, fn)	fn(arg)
 #endif /* CONFIG_IRQSTACKS */
 
-/* ONLY called from entry.S:intr_extint() */
-asmlinkage void do_cpu_irq_mask(struct pt_regs *regs)
+static void do_cpu_irq_mask(struct pt_regs *regs)
 {
-	struct pt_regs *old_regs;
 	unsigned long eirr_val;
 	int irq, cpu = smp_processor_id();
 	struct irq_data *irq_data;
 #ifdef CONFIG_SMP
 	cpumask_t dest;
 #endif
-
-	old_regs = set_irq_regs(regs);
-	local_irq_disable();
-	irq_enter_rcu();
 
 	eirr_val = mfctl(23) & cpu_eiem & per_cpu(local_ack_eiem, cpu);
 	if (!eirr_val)
@@ -525,22 +524,40 @@ asmlinkage void do_cpu_irq_mask(struct pt_regs *regs)
 	}
 #endif
 	stack_overflow_check(regs);
-
-#ifdef CONFIG_IRQSTACKS
-	execute_on_irq_stack(&generic_handle_irq, irq);
-#else
 	generic_handle_irq(irq);
-#endif /* CONFIG_IRQSTACKS */
-
- out:
-	irq_exit_rcu();
-	set_irq_regs(old_regs);
 	return;
 
  set_out:
 	set_eiem(cpu_eiem & per_cpu(local_ack_eiem, cpu));
-	goto out;
+	return;
 }
+
+
+static void noinstr handle_parisc_irq(struct pt_regs *regs)
+{
+	struct pt_regs *old_regs;
+
+	irq_enter_rcu();
+	old_regs = set_irq_regs(regs);
+	// handle_arch_irq(regs);
+	do_cpu_irq_mask(regs);
+	set_irq_regs(old_regs);
+	irq_exit_rcu();
+}
+
+/* ONLY called from entry.S:intr_extint() */
+asmlinkage void noinstr do_irq(struct pt_regs *regs)
+{
+	irqentry_state_t state = irqentry_enter(regs);
+
+	if (IS_ENABLED(CONFIG_IRQ_STACKS) && on_thread_stack())
+		call_on_irq_stack(regs, handle_parisc_irq);
+	else
+		handle_parisc_irq(regs);
+
+	irqentry_exit(regs, state);
+}
+
 
 static void claim_cpu_irqs(void)
 {

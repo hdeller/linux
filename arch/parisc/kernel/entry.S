@@ -145,7 +145,7 @@
 	.endm
 
 	/* Interrupt interruption handler
-	 * (calls irq.c:do_cpu_irq_mask) */
+	 * (calls irq.c:do_irq) */
 	.macro	extint code
 	b	intr_extint
 	mfsp    %sr7,%r16
@@ -725,7 +725,7 @@ END(fault_vector_11)
 	.align		PAGE_SIZE
 
 	.import		handle_interruption,code
-	.import		do_cpu_irq_mask,code
+	.import		do_irq,code
 
 	/*
 	 * Child Returns here
@@ -1006,7 +1006,7 @@ intr_extint:
 	ldo	-16(%r30),%r29	/* Reference param save area */
 #endif
 
-	b	do_cpu_irq_mask
+	b	do_irq
 	ldo	R%intr_return(%r2), %r2	/* return to intr_return, not here */
 ENDPROC_CFI(syscall_exit_rfi)
 
