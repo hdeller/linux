@@ -8,6 +8,7 @@
 
 struct thread_info {
 	unsigned long flags;		/* thread_info flags (see TIF_*) */
+	unsigned long syscall_work;	/* SYSCALL_WORK_ flags */
 	int preempt_count;		/* 0=premptable, <0=BUG; will also serve as bh-counter */
 #ifdef CONFIG_SMP
 	unsigned int cpu;

@@ -276,6 +276,8 @@ extern unsigned long __get_wchan(struct task_struct *p);
 
 #define cpu_relax()	barrier()
 
+register unsigned long current_stack_pointer asm("r30");
+
 /*
  * parisc_requires_coherency() is used to identify the combined VIPT/PIPT
  * cached CPUs which require a guarantee of coherency (no inequivalent aliases

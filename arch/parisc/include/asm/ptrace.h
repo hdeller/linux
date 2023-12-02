@@ -6,7 +6,11 @@
 #define _PARISC_PTRACE_H
 
 #include <asm/assembly.h>
+#include <asm/psw.h>
 #include <uapi/asm/ptrace.h>
+
+#define PTRACE_SYSEMU                  31
+#define PTRACE_SYSEMU_SINGLESTEP       32
 
 #define task_regs(task) ((struct pt_regs *) ((char *)(task) + TASK_REGS))
 
@@ -49,5 +53,11 @@ static inline unsigned long regs_get_register(struct pt_regs *regs,
 
 unsigned long regs_get_kernel_stack_nth(struct pt_regs *regs, unsigned int n);
 int regs_within_kernel_stack(struct pt_regs *regs, unsigned long addr);
+
+static inline int regs_irqs_disabled(struct pt_regs *regs)
+{
+	/* PSW is in gr[0] */
+	return !(regs->gr[0] & PSW_I);
+}
 
 #endif

@@ -64,4 +64,31 @@ static inline int syscall_get_arch(struct task_struct *task)
 #endif
 	return arch;
 }
+
+extern void * const sys_call_table[];
+extern void * const sys_call_table64[];
+
+typedef long (*syscall_t)(ulong, ulong, ulong, ulong, ulong, ulong, ulong);
+static inline void syscall_handler(struct pt_regs *regs, ulong syscall)
+{
+	syscall_t fn;
+
+#ifdef CONFIG_COMPAT
+	/* W hidden in bottom bit of sp */
+	if (regs->gr[30] & 1)
+		fn = sys_call_table64[syscall];
+	else
+#endif
+		fn = sys_call_table[syscall];
+
+	regs->gr[28] = fn(regs->gr[26], regs->gr[25], regs->gr[24], regs->gr[23],
+			regs->gr[22], regs->gr[21], regs->gr[20]); // XXX for
+								   // 32/64bit
+}
+
+static inline bool arch_syscall_is_vdso_sigreturn(struct pt_regs *regs)
+{
+	return false;
+}
+
 #endif /*_ASM_PARISC_SYSCALL_H_*/
