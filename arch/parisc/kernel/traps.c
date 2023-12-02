@@ -25,6 +25,7 @@
 #include <linux/spinlock.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
+#include <linux/entry-common.h>
 #include <linux/console.h>
 #include <linux/bug.h>
 #include <linux/ratelimit.h>
@@ -277,7 +278,7 @@ static void handle_gdb_break(struct pt_regs *regs, int wot)
 			(void __user *) (regs->iaoq[0] & ~3));
 }
 
-static void handle_break(struct pt_regs *regs)
+void handle_break(struct pt_regs *regs)
 {
 	unsigned iir = regs->iir;
 
@@ -470,6 +471,18 @@ void parisc_terminate(char *msg, struct pt_regs *regs, int code, unsigned long o
 	 * and it enables reboot timers!
 	 */
 	panic(msg);
+}
+
+asmlinkage __visible noinstr void do_page_fault(struct pt_regs *regs,
+		unsigned long code, unsigned long address)
+{
+	irqentry_state_t state = irqentry_enter(regs);
+
+	handle_page_fault(regs, code, address);
+
+	local_irq_disable();
+
+	irqentry_exit(regs, state);
 }
 
 void notrace handle_interruption(int code, struct pt_regs *regs)

@@ -259,7 +259,7 @@ show_signal_msg(struct pt_regs *regs, unsigned long code,
 	show_regs(regs);
 }
 
-void do_page_fault(struct pt_regs *regs, unsigned long code,
+void handle_page_fault(struct pt_regs *regs, unsigned long code,
 			      unsigned long address)
 {
 	struct vm_area_struct *vma, *prev_vma;
