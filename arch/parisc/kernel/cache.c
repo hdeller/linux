@@ -31,19 +31,22 @@
 #include <asm/mmu_context.h>
 #include <asm/cachectl.h>
 
+#define PTR_PAGE_ALIGN_DOWN(addr) PTR_ALIGN_DOWN(addr, PAGE_SIZE)
+
 int split_tlb __ro_after_init;
 int dcache_stride __ro_after_init;
 int icache_stride __ro_after_init;
 EXPORT_SYMBOL(dcache_stride);
 
+/* Internal implementation in arch/parisc/kernel/pacache.S */
 void flush_dcache_page_asm(unsigned long phys_addr, unsigned long vaddr);
 EXPORT_SYMBOL(flush_dcache_page_asm);
 void purge_dcache_page_asm(unsigned long phys_addr, unsigned long vaddr);
 void flush_icache_page_asm(unsigned long phys_addr, unsigned long vaddr);
-
-/* Internal implementation in arch/parisc/kernel/pacache.S */
 void flush_data_cache_local(void *);  /* flushes local data-cache only */
 void flush_instruction_cache_local(void); /* flushes local code-cache only */
+
+static void flush_kernel_dcache_page_addr(const void *addr);
 
 /* On some machines (i.e., ones with the Merced bus), there can be
  * only a single PxTLB broadcast at a time; this must be guaranteed
@@ -321,6 +324,18 @@ __flush_cache_page(struct vm_area_struct *vma, unsigned long vmaddr,
 {
 	if (!static_branch_likely(&parisc_has_cache))
 		return;
+
+	/*
+	 * The TLB is the engine of coherence on parisc.  The CPU is
+	 * entitled to speculate any page with a TLB mapping, so here
+	 * we kill the mapping then flush the page along a special flush
+	 * only alias mapping. This guarantees that the page is no-longer
+	 * in the cache for any process and nor may it be speculatively
+	 * read in (until the user or kernel specifically accesses it,
+	 * of course).
+	 */
+	flush_tlb_page(vma, vmaddr);
+
 	preempt_disable();
 	flush_dcache_page_asm(physaddr, vmaddr);
 	if (vma->vm_flags & VM_EXEC)
@@ -328,45 +343,43 @@ __flush_cache_page(struct vm_area_struct *vma, unsigned long vmaddr,
 	preempt_enable();
 }
 
-static void flush_user_cache_page(struct vm_area_struct *vma, unsigned long vmaddr)
+static void flush_kernel_dcache_page_addr(const void *addr)
 {
-	unsigned long flags, space, pgd, prot;
-#ifdef CONFIG_TLB_PTLOCK
-	unsigned long pgd_lock;
-#endif
+	unsigned long vaddr = (unsigned long)addr;
+	unsigned long flags;
 
-	vmaddr &= PAGE_MASK;
+	/* Purge TLB entry to remove translation on all CPUs */
+	purge_tlb_start(flags);
+	pdtlb(SR_KERNEL, addr);
+	purge_tlb_end(flags);
 
+	/* Use tmpalias flush to prevent data cache move-in */
 	preempt_disable();
-
-	/* Set context for flush */
-	local_irq_save(flags);
-	prot = mfctl(8);
-	space = mfsp(SR_USER);
-	pgd = mfctl(25);
-#ifdef CONFIG_TLB_PTLOCK
-	pgd_lock = mfctl(28);
-#endif
-	switch_mm_irqs_off(NULL, vma->vm_mm, NULL);
-	local_irq_restore(flags);
-
-	flush_user_dcache_range_asm(vmaddr, vmaddr + PAGE_SIZE);
-	if (vma->vm_flags & VM_EXEC)
-		flush_user_icache_range_asm(vmaddr, vmaddr + PAGE_SIZE);
-	flush_tlb_page(vma, vmaddr);
-
-	/* Restore previous context */
-	local_irq_save(flags);
-#ifdef CONFIG_TLB_PTLOCK
-	mtctl(pgd_lock, 28);
-#endif
-	mtctl(pgd, 25);
-	mtsp(space, SR_USER);
-	mtctl(prot, 8);
-	local_irq_restore(flags);
-
+	flush_dcache_page_asm(__pa(vaddr), vaddr);
 	preempt_enable();
 }
+
+static void flush_kernel_icache_page_addr(const void *addr)
+{
+	unsigned long vaddr = (unsigned long)addr;
+	unsigned long flags;
+
+	/* Purge TLB entry to remove translation on all CPUs */
+	purge_tlb_start(flags);
+	pdtlb(SR_KERNEL, addr);
+	purge_tlb_end(flags);
+
+	/* Use tmpalias flush to prevent instruction cache move-in */
+	preempt_disable();
+	flush_icache_page_asm(__pa(vaddr), vaddr);
+	preempt_enable();
+}
+
+void kunmap_flush_on_unmap(const void *addr)
+{
+	flush_kernel_dcache_page_addr(addr);
+}
+EXPORT_SYMBOL(kunmap_flush_on_unmap);
 
 void flush_icache_pages(struct vm_area_struct *vma, struct page *page,
 		unsigned int nr)
@@ -375,11 +388,43 @@ void flush_icache_pages(struct vm_area_struct *vma, struct page *page,
 
 	for (;;) {
 		flush_kernel_dcache_page_addr(kaddr);
-		flush_kernel_icache_page(kaddr);
+		flush_kernel_icache_page_addr(kaddr);
 		if (--nr == 0)
 			break;
 		kaddr += PAGE_SIZE;
 	}
+}
+
+static inline unsigned long get_upa(struct mm_struct *mm, unsigned long addr)
+{
+	unsigned long flags, space, pgd, prot, pa;
+#ifdef CONFIG_TLB_PTLOCK
+	unsigned long pgd_lock;
+#endif
+
+	/* Save context */
+	local_irq_save(flags);
+	prot = mfctl(8);
+	space = mfsp(SR_USER);
+	pgd = mfctl(25);
+#ifdef CONFIG_TLB_PTLOCK
+	pgd_lock = mfctl(28);
+#endif
+
+	/* Set context for lpa_user */
+	switch_mm_irqs_off(NULL, mm, NULL);
+	pa = lpa_user(addr);
+
+	/* Restore previous context */
+#ifdef CONFIG_TLB_PTLOCK
+	mtctl(pgd_lock, 28);
+#endif
+	mtctl(pgd, 25);
+	mtsp(space, SR_USER);
+	mtctl(prot, 8);
+	local_irq_restore(flags);
+
+	return pa;
 }
 
 static inline pte_t *get_ptep(struct mm_struct *mm, unsigned long addr)
@@ -402,12 +447,6 @@ static inline pte_t *get_ptep(struct mm_struct *mm, unsigned long addr)
 		}
 	}
 	return ptep;
-}
-
-static inline bool pte_needs_flush(pte_t pte)
-{
-	return (pte_val(pte) & (_PAGE_PRESENT | _PAGE_ACCESSED | _PAGE_NO_CACHE))
-		== (_PAGE_PRESENT | _PAGE_ACCESSED);
 }
 
 void flush_dcache_folio(struct folio *folio)
@@ -458,50 +497,23 @@ void flush_dcache_folio(struct folio *folio)
 		if (addr + nr * PAGE_SIZE > vma->vm_end)
 			nr = (vma->vm_end - addr) / PAGE_SIZE;
 
-		if (parisc_requires_coherency()) {
-			for (i = 0; i < nr; i++) {
-				pte_t *ptep = get_ptep(vma->vm_mm,
-							addr + i * PAGE_SIZE);
-				if (!ptep)
-					continue;
-				if (pte_needs_flush(*ptep))
-					flush_user_cache_page(vma,
-							addr + i * PAGE_SIZE);
-				/* Optimise accesses to the same table? */
-				pte_unmap(ptep);
-			}
-		} else {
-			/*
-			 * The TLB is the engine of coherence on parisc:
-			 * The CPU is entitled to speculate any page
-			 * with a TLB mapping, so here we kill the
-			 * mapping then flush the page along a special
-			 * flush only alias mapping. This guarantees that
-			 * the page is no-longer in the cache for any
-			 * process and nor may it be speculatively read
-			 * in (until the user or kernel specifically
-			 * accesses it, of course)
-			 */
-			for (i = 0; i < nr; i++)
-				flush_tlb_page(vma, addr + i * PAGE_SIZE);
-			if (old_addr == 0 || (old_addr & (SHM_COLOUR - 1))
+		if (old_addr == 0 || (old_addr & (SHM_COLOUR - 1))
 					!= (addr & (SHM_COLOUR - 1))) {
-				for (i = 0; i < nr; i++)
-					__flush_cache_page(vma,
-						addr + i * PAGE_SIZE,
-						(pfn + i) * PAGE_SIZE);
-				/*
-				 * Software is allowed to have any number
-				 * of private mappings to a page.
-				 */
-				if (!(vma->vm_flags & VM_SHARED))
-					continue;
-				if (old_addr)
-					pr_err("INEQUIVALENT ALIASES 0x%lx and 0x%lx in file %pD\n",
-						old_addr, addr, vma->vm_file);
-				if (nr == folio_nr_pages(folio))
-					old_addr = addr;
-			}
+			for (i = 0; i < nr; i++)
+				__flush_cache_page(vma,
+					addr + i * PAGE_SIZE,
+					(pfn + i) * PAGE_SIZE);
+			/*
+			 * Software is allowed to have any number
+			 * of private mappings to a page.
+			 */
+			if (!(vma->vm_flags & VM_SHARED))
+				continue;
+			if (old_addr)
+				pr_err("INEQUIVALENT ALIASES 0x%lx and 0x%lx in file %pD\n",
+					old_addr, addr, vma->vm_file);
+			if (nr == folio_nr_pages(folio))
+				old_addr = addr;
 		}
 		WARN_ON(++count == 4096);
 	}
@@ -591,35 +603,31 @@ extern void purge_kernel_dcache_page_asm(unsigned long);
 extern void clear_user_page_asm(void *, unsigned long);
 extern void copy_user_page_asm(void *, void *, unsigned long);
 
-void flush_kernel_dcache_page_addr(const void *addr)
-{
-	unsigned long flags;
-
-	flush_kernel_dcache_page_asm(addr);
-	purge_tlb_start(flags);
-	pdtlb(SR_KERNEL, addr);
-	purge_tlb_end(flags);
-}
-EXPORT_SYMBOL(flush_kernel_dcache_page_addr);
-
 static void flush_cache_page_if_present(struct vm_area_struct *vma,
-	unsigned long vmaddr, unsigned long pfn)
+	unsigned long vmaddr)
 {
-	bool needs_flush = false;
 	pte_t *ptep;
+	unsigned long flags, pfn, physaddr;
+	struct mm_struct *mm = vma->vm_mm;
 
-	/*
-	 * The pte check is racy and sometimes the flush will trigger
-	 * a non-access TLB miss. Hopefully, the page has already been
-	 * flushed.
-	 */
-	ptep = get_ptep(vma->vm_mm, vmaddr);
-	if (ptep) {
-		needs_flush = pte_needs_flush(*ptep);
+	physaddr = get_upa(mm, vmaddr);
+	if (!physaddr) {
+		spin_lock_irqsave(&mm->page_table_lock, flags);
+		ptep = get_ptep(mm, vmaddr);
+		if (!ptep) {
+			spin_unlock_irqrestore(&mm->page_table_lock, flags);
+			return;
+		}
+		pfn = pte_pfn(*ptep);
+		spin_unlock_irqrestore(&mm->page_table_lock, flags);
+
+		if (WARN_ON(!pfn_valid(pfn)))
+			return;
+		physaddr = PFN_PHYS(pfn);
 		pte_unmap(ptep);
 	}
-	if (needs_flush)
-		flush_cache_page(vma, vmaddr, pfn);
+
+	__flush_cache_page(vma, vmaddr, physaddr);
 }
 
 void copy_user_highpage(struct page *to, struct page *from,
@@ -629,7 +637,7 @@ void copy_user_highpage(struct page *to, struct page *from,
 
 	kfrom = kmap_local_page(from);
 	kto = kmap_local_page(to);
-	flush_cache_page_if_present(vma, vaddr, page_to_pfn(from));
+	__flush_cache_page(vma, vaddr, PFN_PHYS(page_to_pfn(from)));
 	copy_page_asm(kto, kfrom);
 	kunmap_local(kto);
 	kunmap_local(kfrom);
@@ -638,16 +646,17 @@ void copy_user_highpage(struct page *to, struct page *from,
 void copy_to_user_page(struct vm_area_struct *vma, struct page *page,
 		unsigned long user_vaddr, void *dst, void *src, int len)
 {
-	flush_cache_page_if_present(vma, user_vaddr, page_to_pfn(page));
+	__flush_cache_page(vma, user_vaddr, PFN_PHYS(page_to_pfn(page)));
 	memcpy(dst, src, len);
-	flush_kernel_dcache_range_asm((unsigned long)dst, (unsigned long)dst + len);
+	flush_kernel_dcache_page_addr(PTR_PAGE_ALIGN_DOWN(dst));
 }
 
 void copy_from_user_page(struct vm_area_struct *vma, struct page *page,
 		unsigned long user_vaddr, void *dst, void *src, int len)
 {
-	flush_cache_page_if_present(vma, user_vaddr, page_to_pfn(page));
+	__flush_cache_page(vma, user_vaddr, PFN_PHYS(page_to_pfn(page)));
 	memcpy(dst, src, len);
+	flush_kernel_dcache_page_addr(PTR_PAGE_ALIGN_DOWN(src));
 }
 
 /* __flush_tlb_range()
@@ -681,32 +690,10 @@ int __flush_tlb_range(unsigned long sid, unsigned long start,
 
 static void flush_cache_pages(struct vm_area_struct *vma, unsigned long start, unsigned long end)
 {
-	unsigned long addr, pfn;
-	pte_t *ptep;
+	unsigned long addr;
 
-	for (addr = start; addr < end; addr += PAGE_SIZE) {
-		bool needs_flush = false;
-		/*
-		 * The vma can contain pages that aren't present. Although
-		 * the pte search is expensive, we need the pte to find the
-		 * page pfn and to check whether the page should be flushed.
-		 */
-		ptep = get_ptep(vma->vm_mm, addr);
-		if (ptep) {
-			needs_flush = pte_needs_flush(*ptep);
-			pfn = pte_pfn(*ptep);
-			pte_unmap(ptep);
-		}
-		if (needs_flush) {
-			if (parisc_requires_coherency()) {
-				flush_user_cache_page(vma, addr);
-			} else {
-				if (WARN_ON(!pfn_valid(pfn)))
-					return;
-				__flush_cache_page(vma, addr, PFN_PHYS(pfn));
-			}
-		}
-	}
+	for (addr = start; addr < end; addr += PAGE_SIZE)
+		flush_cache_page_if_present(vma, addr);
 }
 
 static inline unsigned long mm_total_size(struct mm_struct *mm)
@@ -757,21 +744,19 @@ void flush_cache_range(struct vm_area_struct *vma, unsigned long start, unsigned
 		if (WARN_ON(IS_ENABLED(CONFIG_SMP) && arch_irqs_disabled()))
 			return;
 		flush_tlb_range(vma, start, end);
-		flush_cache_all();
+		if (vma->vm_flags & VM_EXEC)
+			flush_cache_all();
+		else
+			flush_data_cache();
 		return;
 	}
 
-	flush_cache_pages(vma, start, end);
+	flush_cache_pages(vma, start & PAGE_MASK, end);
 }
 
 void flush_cache_page(struct vm_area_struct *vma, unsigned long vmaddr, unsigned long pfn)
 {
-	if (WARN_ON(!pfn_valid(pfn)))
-		return;
-	if (parisc_requires_coherency())
-		flush_user_cache_page(vma, vmaddr);
-	else
-		__flush_cache_page(vma, vmaddr, PFN_PHYS(pfn));
+	__flush_cache_page(vma, vmaddr, PFN_PHYS(pfn));
 }
 
 void flush_anon_page(struct vm_area_struct *vma, struct page *page, unsigned long vmaddr)
@@ -779,35 +764,91 @@ void flush_anon_page(struct vm_area_struct *vma, struct page *page, unsigned lon
 	if (!PageAnon(page))
 		return;
 
-	if (parisc_requires_coherency()) {
-		if (vma->vm_flags & VM_SHARED)
-			flush_data_cache();
-		else
-			flush_user_cache_page(vma, vmaddr);
+	__flush_cache_page(vma, vmaddr, PFN_PHYS(page_to_pfn(page)));
+}
+
+/*
+ * The physical address for pages in the ioremap case can be obtained
+ * from the vm_struct struct. I wasn't able to successfully handle the
+ * vmalloc and vmap cases. We have an array of struct page pointers in
+ * the uninitialized vmalloc case but the flush failed using page_to_pfn.
+ */
+void flush_cache_vmap(unsigned long start, unsigned long end)
+{
+	unsigned long addr, physaddr;
+	struct vm_struct *vm;
+
+	/* Prevent cache move-in */
+	flush_tlb_kernel_range(start, end);
+
+	if (end - start >= parisc_cache_flush_threshold) {
+		flush_cache_all();
 		return;
 	}
 
-	flush_tlb_page(vma, vmaddr);
-	preempt_disable();
-	flush_dcache_page_asm(page_to_phys(page), vmaddr);
-	preempt_enable();
-}
+	if (WARN_ON_ONCE(!is_vmalloc_addr((void *)start))) {
+		flush_cache_all();
+		return;
+	}
 
+	vm = find_vm_area((void *)start);
+	if (WARN_ON_ONCE(!vm)) {
+		flush_cache_all();
+		return;
+	}
+
+	/* The physical addresses of IOREMAP regions are contiguous */
+	if (vm->flags & VM_IOREMAP) {
+		physaddr = vm->phys_addr;
+		for (addr = start; addr < end; addr += PAGE_SIZE) {
+			preempt_disable();
+			flush_dcache_page_asm(physaddr, start);
+			flush_icache_page_asm(physaddr, start);
+			preempt_enable();
+			physaddr += PAGE_SIZE;
+		}
+		return;
+	}
+
+	flush_cache_all();
+}
+EXPORT_SYMBOL(flush_cache_vmap);
+
+/*
+ * The vm_struct has been retired and the page table is set up. The
+ * last page in the range is a guard page. Its physical address can't
+ * be determined using lpa, so there is no way to flush the range
+ * using flush_dcache_page_asm.
+ */
+void flush_cache_vunmap(unsigned long start, unsigned long end)
+{
+	/* Prevent cache move-in */
+	flush_tlb_kernel_range(start, end);
+	flush_data_cache();
+}
+EXPORT_SYMBOL(flush_cache_vunmap);
+
+/*
+ * On systems with PA8800/PA8900 processors, there is no way to flush
+ * a vmap range other than using the architected loop to flush the
+ * entire cache. The page directory is not set up, so we can't use
+ * fdc, etc. FDCE/FICE don't work to flush a portion of the cache.
+ * L2 is physically indexed but FDCE/FICE instructions in virtual
+ * mode output their virtual address on the core bus, not their
+ * real address. As a result, the L2 cache index formed from the
+ * virtual address will most likely not be the same as the L2 index
+ * formed from the real address.
+ */
 void flush_kernel_vmap_range(void *vaddr, int size)
 {
 	unsigned long start = (unsigned long)vaddr;
 	unsigned long end = start + size;
 
-	if ((!IS_ENABLED(CONFIG_SMP) || !arch_irqs_disabled()) &&
-	    (unsigned long)size >= parisc_cache_flush_threshold) {
-		flush_tlb_kernel_range(start, end);
-		flush_data_cache();
-		return;
-	}
+	BUG_ON(IS_ENABLED(CONFIG_SMP) && arch_irqs_disabled());
 
-	flush_kernel_dcache_range_asm(start, end);
 	flush_tlb_kernel_range(start, end);
-}
+	flush_data_cache();
+ }
 EXPORT_SYMBOL(flush_kernel_vmap_range);
 
 void invalidate_kernel_vmap_range(void *vaddr, int size)
@@ -818,16 +859,11 @@ void invalidate_kernel_vmap_range(void *vaddr, int size)
 	/* Ensure DMA is complete */
 	asm_syncdma();
 
-	if ((!IS_ENABLED(CONFIG_SMP) || !arch_irqs_disabled()) &&
-	    (unsigned long)size >= parisc_cache_flush_threshold) {
-		flush_tlb_kernel_range(start, end);
-		flush_data_cache();
-		return;
-	}
+	BUG_ON(IS_ENABLED(CONFIG_SMP) && arch_irqs_disabled());
 
-	purge_kernel_dcache_range_asm(start, end);
 	flush_tlb_kernel_range(start, end);
-}
+	flush_data_cache();
+ }
 EXPORT_SYMBOL(invalidate_kernel_vmap_range);
 
 
