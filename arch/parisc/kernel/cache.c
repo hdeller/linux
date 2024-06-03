@@ -612,17 +612,23 @@ static void flush_cache_page_if_present(struct vm_area_struct *vma,
 
 	physaddr = get_upa(mm, vmaddr);
 	if (!physaddr) {
+		pte_t pte;
 		spin_lock_irqsave(&mm->page_table_lock, flags);
 		ptep = get_ptep(mm, vmaddr);
 		if (!ptep) {
 			spin_unlock_irqrestore(&mm->page_table_lock, flags);
 			return;
 		}
-		pfn = pte_pfn(*ptep);
+		pte = *ptep;
+		pfn = pte_pfn(pte);
 		spin_unlock_irqrestore(&mm->page_table_lock, flags);
 
-		if (WARN_ON(!pfn_valid(pfn)))
+		if (!pfn_valid(pfn)) {
+#define is_swappp(pte) !pte_none(pte) && !pte_present(pte)
+			pr_warn("PFN NOT VALID: ptep %p, pte %lx, pfn %lx, pte none=%d, pte present=%lu, swap=%d\n", ptep, pte_val(pte), pfn, pte_none(pte), pte_present(pte), is_swappp(pte));
+			WARN_ON(1);
 			return;
+		}
 		physaddr = PFN_PHYS(pfn);
 		pte_unmap(ptep);
 	}
@@ -723,7 +729,8 @@ void flush_cache_mm(struct mm_struct *mm)
 	 * with aliasing caches to prevent random segmentation
 	 * faults.
 	 */
-	if (!parisc_requires_coherency()
+	// HACK: always flush whole cache...!
+	if (1 || !parisc_requires_coherency()
 	    ||  mm_total_size(mm) >= parisc_cache_flush_threshold) {
 		if (WARN_ON(IS_ENABLED(CONFIG_SMP) && arch_irqs_disabled()))
 			return;
