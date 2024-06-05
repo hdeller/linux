@@ -624,9 +624,8 @@ static void flush_cache_page_if_present(struct vm_area_struct *vma,
 		spin_unlock_irqrestore(&mm->page_table_lock, flags);
 
 		if (!pfn_valid(pfn)) {
-#define is_swappp(pte) !pte_none(pte) && !pte_present(pte)
-			pr_warn("PFN NOT VALID: ptep %p, pte %lx, pfn %lx, pte none=%d, pte present=%lu, swap=%d\n", ptep, pte_val(pte), pfn, pte_none(pte), pte_present(pte), is_swappp(pte));
-			WARN_ON(1);
+			/* pte is probably swap, warn otherwise */
+			WARN_ON(pte_none(pte));
 			return;
 		}
 		physaddr = PFN_PHYS(pfn);
