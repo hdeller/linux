@@ -746,12 +746,13 @@ void flush_cache_mm(struct mm_struct *mm)
 
 void flush_cache_range(struct vm_area_struct *vma, unsigned long start, unsigned long end)
 {
-	if (!parisc_requires_coherency()
+	// always flush all caches
+	if (1 || !parisc_requires_coherency()
 	    || end - start >= parisc_cache_flush_threshold) {
 		if (WARN_ON(IS_ENABLED(CONFIG_SMP) && arch_irqs_disabled()))
 			return;
 		flush_tlb_range(vma, start, end);
-		if (vma->vm_flags & VM_EXEC)
+		if (1 || vma->vm_flags & VM_EXEC)
 			flush_cache_all();
 		else
 			flush_data_cache();
