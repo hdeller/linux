@@ -16,6 +16,8 @@ extern struct vdso_data *vdso_data;
 
 #endif /* __ASSEMBLY __ */
 
+#define __VVAR_PAGES    2
+
 /* Default link addresses for the vDSOs */
 #define VDSO_LBASE	0
 

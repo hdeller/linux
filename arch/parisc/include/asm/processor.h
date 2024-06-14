@@ -16,7 +16,6 @@
 #include <asm/assembly.h>
 #include <asm/prefetch.h>
 #include <asm/hardware.h>
-#include <asm/pdc.h>
 #include <asm/ptrace.h>
 #include <asm/types.h>
 #include <asm/percpu.h>
@@ -50,6 +49,11 @@
 struct rlimit;
 unsigned long mmap_upper_limit(struct rlimit *rlim_stack);
 unsigned long calc_max_stack_size(unsigned long stack_max);
+
+
+#if !defined(BUILD_VDSO)
+
+#include <asm/pdc.h>
 
 /*
  * Data detected about CPUs at boot time which is the same for all CPU's.
@@ -99,6 +103,8 @@ struct cpuinfo_parisc {
 extern struct system_cpuinfo_parisc boot_cpu_data;
 DECLARE_PER_CPU(struct cpuinfo_parisc, cpu_data);
 extern int time_keeper_id;		/* CPU used for timekeeping */
+
+#endif /* !defined(BUILD_VDSO) */
 
 #define CPU_HVERSION ((boot_cpu_data.hversion >> 4) & 0x0FFF)
 

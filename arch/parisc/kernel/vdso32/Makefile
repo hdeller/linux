@@ -1,11 +1,27 @@
-# List of files in the vdso, has to be asm only for now
+# Include the generic Makefile to check the built vdso.
+include $(srctree)/lib/vdso/Makefile
 
+KCOV_INSTRUMENT := n
+
+# Disable gcov profiling, ubsan and kasan for VDSO code
+GCOV_PROFILE := n
+UBSAN_SANITIZE := n
+KASAN_SANITIZE := n
+KCSAN_SANITIZE := n
+
+# List of files in the vdso, has to be asm only for now
 obj-vdso32 = note.o sigtramp.o restart_syscall.o
+obj-cvdso32 = vdso32_generic.o
 
 # Build rules
 
-targets := $(obj-vdso32) vdso32.so
+targets := $(obj-vdso32) $(obj-cvdso32) vdso32.so
 obj-vdso32 := $(addprefix $(obj)/, $(obj-vdso32))
+obj-cvdso32 := $(addprefix $(obj)/, $(obj-cvdso32))
+
+VDSO_CFLAGS_REMOVE := -pg $(CC_FLAGS_FTRACE)
+CFLAGS_REMOVE_getcpu.o = $(VDSO_CFLAGS_REMOVE)
+CFLAGS_REMOVE_vdso32_generic.o = $(VDSO_CFLAGS_REMOVE)
 
 ccflags-y := -shared -fno-common -fbuiltin -mno-fast-indirect-calls -O2 -mno-long-calls
 #  -march=1.1 -mschedule=7100LC
@@ -17,6 +33,7 @@ KBUILD_AFLAGS += -DBUILD_VDSO
 KBUILD_CFLAGS += -DBUILD_VDSO -DDISABLE_BRANCH_PROFILING
 
 VDSO_LIBGCC := $(shell $(CROSS32CC) -print-libgcc-file-name)
+VDSO_CFLAGS += -DENABLE_COMPAT_VDSO=1
 
 obj-y += vdso32_wrapper.o
 extra-y += vdso32.lds
@@ -42,7 +59,7 @@ quiet_cmd_vdso32ld = VDSO32L $@
 quiet_cmd_vdso32as = VDSO32A $@
       cmd_vdso32as = $(CROSS32CC) $(a_flags) -c -o $@ $<
 quiet_cmd_vdso32cc = VDSO32C $@
-      cmd_vdso32cc = $(CROSS32CC) $(c_flags) -c -fPIC -mno-fast-indirect-calls -o $@ $<
+      cmd_vdso32cc = $(CROSS32CC) -I$(srctree)/arch/parisc/include/asm/vdso $(c_flags) -c -fPIC -mno-fast-indirect-calls -o $@ $<
 
 # Generate VDSO offsets using helper script
 gen-vdsosym := $(srctree)/$(src)/gen_vdso_offsets.sh
