@@ -168,6 +168,7 @@ static int map_vdso(unsigned long addr, unsigned long vdso_mapping_len)
 	if (IS_ERR(vma))
 		goto out;
 	vdso_text_start = vvar_start + VVAR_NR_PAGES * PAGE_SIZE;
+	vdso_text_len -= VVAR_NR_PAGES * PAGE_SIZE;
 	/* VM_MAYWRITE for COW so gdb can set breakpoints */
 	vma = _install_special_mapping(mm, vdso_text_start, vdso_text_len,
 				       VM_READ|VM_EXEC|
