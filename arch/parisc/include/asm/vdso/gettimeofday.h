@@ -2,7 +2,7 @@
 #ifndef ASM_VDSO_GETTIMEOFDAY_H
 #define ASM_VDSO_GETTIMEOFDAY_H
 
-/* need to save GR4 across syscall, see asm/unistd.h */
+/* Enable PIC since need to save GR4 across syscall, see asm/unistd.h */
 #define PIC
 #include <asm/unistd.h>
 
@@ -10,7 +10,6 @@
 
 #define VDSO_HAS_CLOCK_GETRES 1
 
-// #include <asm/syscall.h>
 #include <asm/barrier.h>
 #include <asm/timex.h>
 #include <linux/compiler.h>
@@ -20,14 +19,6 @@
 static inline unsigned long get_vdso_base(void)
 {
 	unsigned long addr, offs;
-
-	/*
-	 * Get the base load address of the VDSO. We have to avoid generating
-	 * relocations and references to the GOT because ld.so does not perform
-	 * relocations on the VDSO. We use the current offset from the VDSO base
-	 * and perform a PC-relative branch which gives the absolute address in
-	 *
-	 */
 
 	__asm__(
 	"	b,l,n	1f,%%r2		\n"
@@ -53,17 +44,8 @@ static __always_inline const struct vdso_data *__arch_get_vdso_data(void)
 
 static inline u64 __arch_get_hw_counter(s32 clock_mode, const struct vdso_data *vd)
 {
-#if 0
-	u64 adj, now;
-
-	now = get_tod_clock();
-	adj = vd->arch_data.tod_steering_end - now;
-	if (unlikely((s64) adj > 0))
-		now += (vd->arch_data.tod_steering_delta < 0) ? (adj >> 15) : -(adj >> 15);
-	return now;
-#else
+	/* XXX CONFIG_SMP ??? */
 	return -1ULL;
-#endif
 }
 
 static __always_inline
