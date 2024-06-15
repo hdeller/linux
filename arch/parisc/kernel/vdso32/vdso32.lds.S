@@ -12,11 +12,8 @@ ENTRY(_start)
 
 SECTIONS
 {
-  PROVIDE(_vdso_data = . - __VVAR_PAGES * PAGE_SIZE);
-#ifdef CONFIG_TIME_NS
-  PROVIDE(_timens_data = _vdso_data + PAGE_SIZE);
-#endif
   . = VDSO_LBASE + SIZEOF_HEADERS;
+  PROVIDE(vdso_start = .);
   .hash           : { *(.hash) }			:text
   .gnu.hash       : { *(.gnu.hash) }
   .dynsym         : { *(.dynsym) }
@@ -110,7 +107,7 @@ VERSION
     global:
 	__kernel_sigtramp_rt32;
 	__kernel_restart_syscall32;
-        __kernel_gettimeofday;
+	__kernel_gettimeofday;
 	__kernel_clock_gettime;
 	__kernel_clock_getres;
 	__kernel_getcpu;
