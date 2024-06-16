@@ -20,7 +20,6 @@ obj-vdso32 := $(addprefix $(obj)/, $(obj-vdso32))
 obj-cvdso32 := $(addprefix $(obj)/, $(obj-cvdso32))
 
 VDSO_CFLAGS_REMOVE := -pg $(CC_FLAGS_FTRACE)
-CFLAGS_REMOVE_getcpu.o = $(VDSO_CFLAGS_REMOVE)
 CFLAGS_REMOVE_vdso32_generic.o = $(VDSO_CFLAGS_REMOVE)
 
 ccflags-y := -shared -fno-common -fbuiltin -mno-fast-indirect-calls -O2 -mno-long-calls

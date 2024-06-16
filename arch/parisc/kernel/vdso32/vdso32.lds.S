@@ -105,12 +105,10 @@ VERSION
 {
   VDSO_VERSION_STRING {
     global:
-	__kernel_sigtramp_rt32;
-	__kernel_restart_syscall32;
-	__kernel_gettimeofday;
-	__kernel_clock_gettime;
-	__kernel_clock_getres;
-	__kernel_getcpu;
+	__vdso_sigtramp_rt32;
+	__vdso_restart_syscall32;
+	__vdso_gettimeofday;
+	__vdso_clock_gettime;
     local: *;
   };
 }
