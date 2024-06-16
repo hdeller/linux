@@ -21,6 +21,6 @@ extern struct vdso_data *vdso_data;
 /* Default link addresses for the vDSOs */
 #define VDSO_LBASE	0
 
-#define VDSO_VERSION_STRING	LINUX_6.11
+#define VDSO_VERSION_STRING	LINUX_5.4
 
 #endif /* __PARISC_VDSO_H__ */
