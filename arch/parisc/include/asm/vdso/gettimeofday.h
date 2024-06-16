@@ -5,6 +5,7 @@
 /* Enable PIC since need to save GR4 across syscall, see asm/unistd.h */
 #define PIC
 #include <asm/unistd.h>
+#include <asm/unistd_32.h>
 
 #define VDSO_HAS_TIME 1
 
@@ -14,7 +15,9 @@
 #include <asm/timex.h>
 #include <linux/compiler.h>
 
+#if !defined(PAGE_SIZE)
 #define PAGE_SIZE	4096
+#endif
 
 static inline unsigned long get_vdso_base(void)
 {
@@ -51,6 +54,14 @@ static inline u64 __arch_get_hw_counter(s32 clock_mode, const struct vdso_data *
 static __always_inline
 long clock_gettime_fallback(clockid_t clkid, struct __kernel_timespec *ts)
 {
+	/* we are 32-bit binary, so need to call gettime64 syscall */
+	return syscall2(__NR_clock_gettime64, (long)clkid, (long)ts);
+}
+
+static __always_inline
+long clock_gettime32_fallback(clockid_t clkid, struct old_timespec32 *ts)
+{
+	/* calls compat function when built as 32-bit binary */
 	return syscall2(__NR_clock_gettime, (long)clkid, (long)ts);
 }
 
@@ -63,6 +74,12 @@ long gettimeofday_fallback(register struct __kernel_old_timeval *tv,
 
 static __always_inline
 long clock_getres_fallback(clockid_t clkid, struct __kernel_timespec *ts)
+{
+	return syscall2(__NR_clock_getres_time64, (long)clkid, (long)ts);
+}
+
+static __always_inline
+long clock_getres32_fallback(clockid_t clkid, struct old_timespec32 *ts)
 {
 	return syscall2(__NR_clock_getres, (long)clkid, (long)ts);
 }

@@ -108,7 +108,8 @@ VERSION
 	__vdso_sigtramp_rt32;
 	__vdso_restart_syscall32;
 	__vdso_gettimeofday;
-	__vdso_clock_gettime;
+	__vdso_clock_gettime32;
+	__vdso_clock_gettime64;
     local: *;
   };
 }
