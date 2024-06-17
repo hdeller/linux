@@ -52,10 +52,14 @@ static __always_inline const struct vdso_data *__arch_get_vdso_data(void)
 
 static inline bool parisc_vdso_hres_capable(void)
 {
+#if defined(BUILD_VDSO32_64)
+	/* cr16 can not provide 64-bit values when running 32-bit */
+	return false;
+#endif
 	if (!IS_ENABLED(CONFIG_SMP))
 		return true;
-	// if (on_qemu) true
 	return false;
+	// if (on_qemu) true
 	return true;
 }
 #define __arch_vdso_hres_capable parisc_vdso_hres_capable
