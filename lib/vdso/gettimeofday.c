@@ -27,7 +27,7 @@ static __always_inline u64 vdso_shift_ns(u64 ns, u32 shift)
 #ifndef __arch_vdso_hres_capable
 static inline bool __arch_vdso_hres_capable(void)
 {
-	return true;
+	return false;
 }
 #endif
 

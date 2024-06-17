@@ -12,6 +12,7 @@
 #define VDSO_HAS_CLOCK_GETRES 1
 
 #include <asm/barrier.h>
+#include <asm/processor.h>
 #include <asm/timex.h>
 #include <linux/compiler.h>
 
@@ -28,8 +29,8 @@ static inline unsigned long get_vdso_base(void)
 	"	.import vdso_start,data	\n"
 	"	.word	vdso_start - .	\n"
 	"1:	copy	%%r2,%0		\n"
-	"	ldw	-4(%0),%1	\n"
-	: "=r" (addr), "=r" (offs) : : "r2");
+	"	ldw	-4-%2(%0),%1	\n"
+	: "=r" (addr), "=r" (offs) : "i" (PRIV_USER) : "r2");
 
 	return (addr + offs) & ~(PAGE_SIZE-1);
 }
@@ -45,10 +46,20 @@ static __always_inline const struct vdso_data *__arch_get_vdso_data(void)
 	return (const struct vdso_data *) get_vdso_base() - 2 * PAGE_SIZE;
 }
 
+static inline bool parisc_vdso_hres_capable(void)
+{
+	if (!IS_ENABLED(CONFIG_SMP))
+		return true;
+	// if (on_qemu) true
+	return false;
+	return true;
+}
+#define __arch_vdso_hres_capable parisc_vdso_hres_capable
+
 static inline u64 __arch_get_hw_counter(s32 clock_mode, const struct vdso_data *vd)
 {
-	/* XXX CONFIG_SMP ??? */
-	return -1ULL;
+	// asm(".word 0xdeadbeef");
+	return get_cycles();
 }
 
 static __always_inline
