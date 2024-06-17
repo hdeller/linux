@@ -43,6 +43,10 @@ static __always_inline u64 __arch_vdso_calc_delta(u64 cycles, u64 last, u64 mask
 
 static __always_inline const struct vdso_data *__arch_get_vdso_data(void)
 {
+	int *p;
+	p = (void*)get_vdso_base() - 2 * PAGE_SIZE;
+	if (*p == *(p+1))
+		asm(".word 0xdeadbeef");
 	return (const struct vdso_data *) get_vdso_base() - 2 * PAGE_SIZE;
 }
 

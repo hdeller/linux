@@ -21,6 +21,6 @@ int __vdso_clock_gettime32(clockid_t clock, struct old_timespec32 *ts)
 
 int __vdso_clock_gettime64(clockid_t clock, struct __kernel_timespec *ts)
 {
-	return clock_gettime_fallback(clock, ts);
-	// return __cvdso_clock_gettime(clock, ts);
+	// return clock_gettime_fallback(clock, ts);
+	return __cvdso_clock_gettime(clock, ts);
 }
