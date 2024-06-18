@@ -78,7 +78,7 @@ static vm_fault_t vvar_fault(const struct vm_special_mapping *sm,
 	unsigned long addr, pfn;
 	vm_fault_t err;
 
-printk("VVAR_FAULT at %lx \n", vmf->address);
+// printk("VVAR_FAULT at %lx \n", vmf->address);
 	switch (vmf->pgoff) {
 	case VVAR_DATA_PAGE_OFFSET:
 		pfn = virt_to_pfn(vdso_data);
@@ -174,7 +174,7 @@ int arch_setup_additional_pages(struct linux_binprm *bprm,
 	vdso_mapping_len = vdso_text_len + VVAR_NR_PAGES * PAGE_SIZE;
 	vvar_start = get_unmapped_area(NULL, map_base, vdso_mapping_len, 0, 0);
 	rc = vvar_start;
-printk("vvar_start = %lx\n", vvar_start);
+// printk("vvar_start = %lx\n", vvar_start);
 	if (IS_ERR_VALUE(vvar_start))
 		goto out;
 	BUILD_BUG_ON(VVAR_NR_PAGES != __VVAR_PAGES);
