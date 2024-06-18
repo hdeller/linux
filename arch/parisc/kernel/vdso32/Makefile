@@ -1,11 +1,25 @@
-# List of files in the vdso, has to be asm only for now
+# Include the generic Makefile to check the built vdso.
+include $(srctree)/lib/vdso/Makefile
+
+KCOV_INSTRUMENT := n
+
+# Disable gcov profiling, ubsan and kasan for VDSO code
+GCOV_PROFILE := n
+UBSAN_SANITIZE := n
+KASAN_SANITIZE := n
+KCSAN_SANITIZE := n
 
 obj-vdso32 = note.o sigtramp.o restart_syscall.o
+obj-cvdso32 = vdso32_generic.o
 
 # Build rules
 
-targets := $(obj-vdso32) vdso32.so
+targets := $(obj-vdso32) $(obj-cvdso32) vdso32.so
 obj-vdso32 := $(addprefix $(obj)/, $(obj-vdso32))
+obj-cvdso32 := $(addprefix $(obj)/, $(obj-cvdso32))
+
+VDSO_CFLAGS_REMOVE := -pg $(CC_FLAGS_FTRACE)
+CFLAGS_REMOVE_vdso32_generic.o = $(VDSO_CFLAGS_REMOVE)
 
 ccflags-y := -shared -fno-common -fbuiltin -mno-fast-indirect-calls -O2 -mno-long-calls
 #  -march=1.1 -mschedule=7100LC
