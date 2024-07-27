@@ -65,6 +65,40 @@ static int parisc_set_state_shutdown(struct clock_event_device *evt)
 	return 0;
 }
 
+static u64 notrace read_cr16_sched_clock(void)
+{
+	return get_cycles();
+}
+
+static u64 notrace read_cr16(struct clocksource *cs)
+{
+	return get_cycles();
+}
+
+static void cr16_cs_mark_unstable(struct clocksource *cs)
+{
+	static bool cr16_unstable = false;
+
+	if (cr16_unstable)
+		return;
+
+	cr16_unstable = true;
+	pr_info("Marking cr16 unstable due to clocksource watchdog\n");
+}
+
+static struct clocksource clocksource_cr16 = {
+	.name		= "cr16",
+	.rating		= 300,
+	.read		= read_cr16,
+	.mask		= CLOCKSOURCE_MASK(BITS_PER_LONG),
+	.flags		= CLOCK_SOURCE_IS_CONTINUOUS |
+				CLOCK_SOURCE_VALID_FOR_HRES |
+				CLOCK_SOURCE_MUST_VERIFY |
+				CLOCK_SOURCE_VERIFY_PERCPU,
+	.mark_unstable	= cr16_cs_mark_unstable,
+};
+
+
 void parisc_clockevent_init(void)
 {
 	unsigned int cpu = smp_processor_id();
@@ -73,8 +107,14 @@ void parisc_clockevent_init(void)
 	unsigned long max_delta = UINT_MAX - min_delta;
 	struct clock_event_device *cd;
 
-	cd = &per_cpu(parisc_clockevent_device, cpu);
+	/*
+	 * The cr16 interval timers are not synchronized across CPUs
+	 * on older 64-bit SMP machines.
+	 */
+	if (cpu > 0 && !running_on_qemu && !parisc_requires_coherency())
+		clocksource_mark_unstable(&clocksource_cr16);
 
+	cd = &per_cpu(parisc_clockevent_device, cpu);
 	cd->name = "cr16_clockevent";
 	cd->features = CLOCK_EVT_FEAT_ONESHOT | CLOCK_EVT_FEAT_PERIODIC |
 			CLOCK_EVT_FEAT_PERCPU;
@@ -170,45 +210,6 @@ void read_persistent_clock64(struct timespec64 *ts)
 	}
 }
 
-static u64 notrace read_cr16_sched_clock(void)
-{
-	return get_cycles();
-}
-
-static u64 notrace read_cr16(struct clocksource *cs)
-{
-	return get_cycles();
-}
-
-static void cr16_cs_mark_unstable(struct clocksource *cs)
-{
-	static bool cr16_unstable = false;
-
-	if (cr16_unstable)
-		return;
-
-	cr16_unstable = true;
-	pr_info("Marking TSC unstable due to clocksource watchdog\n");
-}
-
-static void cr16_cs_tick_stable(struct clocksource *cs)
-{
-	printk("Marking cr16 stable. Huh ??\n");
-}
-
-static struct clocksource clocksource_cr16 = {
-	.name		= "cr16",
-	.rating		= 300,
-	.read		= read_cr16,
-	.mask		= CLOCKSOURCE_MASK(BITS_PER_LONG),
-	.flags		= CLOCK_SOURCE_IS_CONTINUOUS |
-				CLOCK_SOURCE_VALID_FOR_HRES |
-				CLOCK_SOURCE_MUST_VERIFY |
-				CLOCK_SOURCE_VERIFY_PERCPU,
-	.mark_unstable	= cr16_cs_mark_unstable,
-	.tick_stable	= cr16_cs_tick_stable,
-};
-
 /*
  * timer interrupt and sched_clock() initialization
  */
@@ -225,18 +226,6 @@ void __init time_init(void)
 
 	parisc_clockevent_init();
 
-	/*
-	 * The cr16 interval timers are not synchronized across CPUs
-	 * on older 64-bit SMP machines.
-	 */
-	if (num_online_cpus() > 1 && !running_on_qemu &&
-			!parisc_requires_coherency()) {
-		clocksource_cr16.name = "cr16_unstable";
-		clocksource_cr16.flags |= CLOCK_SOURCE_UNSTABLE;
-		clocksource_cr16.rating = 0;
-	}
-
 	/* register at clocksource framework */
 	clocksource_register_hz(&clocksource_cr16, cr16_hz);
 }
-
