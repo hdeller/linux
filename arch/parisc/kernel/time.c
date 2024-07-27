@@ -69,7 +69,8 @@ void parisc_clockevent_init(void)
 {
 	unsigned int cpu = smp_processor_id();
 	unsigned long min_delta = 0x600;	/* XXX */
-	unsigned long max_delta = (1UL << (BITS_PER_LONG/2));
+	/* writing cr16 timeout is limited to 32bit even on 64-bit kernel: */
+	unsigned long max_delta = UINT_MAX - min_delta;
 	struct clock_event_device *cd;
 
 	cd = &per_cpu(parisc_clockevent_device, cpu);
@@ -179,15 +180,33 @@ static u64 notrace read_cr16(struct clocksource *cs)
 	return get_cycles();
 }
 
+static void cr16_cs_mark_unstable(struct clocksource *cs)
+{
+	static bool cr16_unstable = false;
+
+	if (cr16_unstable)
+		return;
+
+	cr16_unstable = true;
+	pr_info("Marking TSC unstable due to clocksource watchdog\n");
+}
+
+static void cr16_cs_tick_stable(struct clocksource *cs)
+{
+	printk("Marking cr16 stable. Huh ??\n");
+}
+
 static struct clocksource clocksource_cr16 = {
-	.name			= "cr16",
-	.rating			= 300,
-	.read			= read_cr16,
-	.mask			= CLOCKSOURCE_MASK(BITS_PER_LONG),
-	.flags			= CLOCK_SOURCE_IS_CONTINUOUS |
-					CLOCK_SOURCE_VALID_FOR_HRES |
-					CLOCK_SOURCE_MUST_VERIFY |
-					CLOCK_SOURCE_VERIFY_PERCPU,
+	.name		= "cr16",
+	.rating		= 300,
+	.read		= read_cr16,
+	.mask		= CLOCKSOURCE_MASK(BITS_PER_LONG),
+	.flags		= CLOCK_SOURCE_IS_CONTINUOUS |
+				CLOCK_SOURCE_VALID_FOR_HRES |
+				CLOCK_SOURCE_MUST_VERIFY |
+				CLOCK_SOURCE_VERIFY_PERCPU,
+	.mark_unstable	= cr16_cs_mark_unstable,
+	.tick_stable	= cr16_cs_tick_stable,
 };
 
 /*
@@ -199,17 +218,21 @@ void __init time_init(void)
 	cr16_hz = 100 * PAGE0->mem_10msec;  /* Hz */
 	clocktick = cr16_hz / HZ;
 
+	printk("Cr16 XXXXXXXXXXX   %llu HZ,   clocktick %lu\n", cr16_hz, clocktick);
+
 	/* register as sched_clock source */
 	sched_clock_register(read_cr16_sched_clock, BITS_PER_LONG, cr16_hz);
 
 	parisc_clockevent_init();
 
 	/*
-	 * The cr16 interval timers are not synchronized across CPUs.
+	 * The cr16 interval timers are not synchronized across CPUs
+	 * on older 64-bit SMP machines.
 	 */
-	if (0 && num_online_cpus() > 1 && !running_on_qemu) {
+	if (num_online_cpus() > 1 && !running_on_qemu &&
+			!parisc_requires_coherency()) {
 		clocksource_cr16.name = "cr16_unstable";
-		clocksource_cr16.flags = CLOCK_SOURCE_UNSTABLE;
+		clocksource_cr16.flags |= CLOCK_SOURCE_UNSTABLE;
 		clocksource_cr16.rating = 0;
 	}
 
