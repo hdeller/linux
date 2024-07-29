@@ -23,6 +23,8 @@ static unsigned long clocktick;
 int time_keeper_id __read_mostly;	/* CPU used for timekeeping. */
 
 static DEFINE_PER_CPU(struct clock_event_device, parisc_clockevent_device);
+static DEFINE_PER_CPU(unsigned long, cr16_per_cpu);
+static DEFINE_PER_CPU(unsigned long, cr16_offset_to_master);
 
 static void parisc_event_handler(struct clock_event_device *dev)
 {
@@ -39,6 +41,9 @@ irqreturn_t timer_interrupt(int irq, void *data)
 {
 	int cpu = smp_processor_id();
 	struct clock_event_device *cd;
+
+	/* save latest cr16 value */
+	per_cpu(cr16_per_cpu, cpu) = mfctl(16);
 
 	cd = &per_cpu(parisc_clockevent_device, cpu);
 	if (clockevent_state_periodic(cd))
@@ -72,10 +77,15 @@ static u64 notrace read_cr16_sched_clock(void)
 
 static u64 notrace read_cr16(struct clocksource *cs)
 {
-	return get_cycles();
+	unsigned int cpu = smp_processor_id();
+
+	if (!IS_ENABLED(CONFIG_SMP))
+		return get_cycles();
+
+	return per_cpu(cr16_offset_to_master, cpu) + get_cycles();
 }
 
-static void cr16_cs_mark_unstable(struct clocksource *cs)
+static void __maybe_unused cr16_cs_mark_unstable(struct clocksource *cs)
 {
 	static bool cr16_unstable = false;
 
@@ -91,11 +101,16 @@ static struct clocksource clocksource_cr16 = {
 	.rating		= 300,
 	.read		= read_cr16,
 	.mask		= CLOCKSOURCE_MASK(BITS_PER_LONG),
+#if defined(CONFIG_SMP)
+	.mark_unstable	= cr16_cs_mark_unstable,
 	.flags		= CLOCK_SOURCE_IS_CONTINUOUS |
 				CLOCK_SOURCE_VALID_FOR_HRES |
 				CLOCK_SOURCE_MUST_VERIFY |
 				CLOCK_SOURCE_VERIFY_PERCPU,
-	.mark_unstable	= cr16_cs_mark_unstable,
+#else
+	.flags		= CLOCK_SOURCE_IS_CONTINUOUS |
+				CLOCK_SOURCE_VALID_FOR_HRES,
+#endif
 };
 
 
@@ -107,12 +122,18 @@ void parisc_clockevent_init(void)
 	unsigned long max_delta = UINT_MAX - min_delta;
 	struct clock_event_device *cd;
 
+	/* diff to master */
+	if (cpu != 0)
+		per_cpu(cr16_offset_to_master, cpu) = mfctl(16) - per_cpu(cr16_per_cpu, 0);
+
 	/*
 	 * The cr16 interval timers are not synchronized across CPUs
 	 * on older 64-bit SMP machines.
 	 */
+#if 0
 	if (cpu > 0 && !running_on_qemu && !parisc_requires_coherency())
 		clocksource_mark_unstable(&clocksource_cr16);
+#endif
 
 	cd = &per_cpu(parisc_clockevent_device, cpu);
 	cd->name = "cr16_clockevent";

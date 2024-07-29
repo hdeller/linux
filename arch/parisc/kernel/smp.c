@@ -328,6 +328,8 @@ void smp_callin(unsigned long pdce_proc)
 			| PAGE0->mem_pdc) != pdce_proc);
 #endif
 
+	printk("  SMP_CALLIN***************** cr16 = %lu", mfctl(16));
+
 	smp_cpu_init(slave_id);
 
 	flush_cache_all_local(); /* start with known state */
