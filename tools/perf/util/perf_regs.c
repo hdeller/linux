@@ -52,6 +52,8 @@ const char *perf_reg_name(int id, const char *arch)
 		reg_name = __perf_reg_name_arm(id);
 	else if (!strcmp(arch, "arm64"))
 		reg_name = __perf_reg_name_arm64(id);
+	else if (!strcmp(arch, "parisc"))
+		reg_name = __perf_reg_name_parisc(id);
 
 	return reg_name ?: "unknown";
 }
@@ -103,6 +105,8 @@ uint64_t perf_arch_reg_ip(const char *arch)
 		return __perf_reg_ip_s390();
 	else if (!strcmp(arch, "x86"))
 		return __perf_reg_ip_x86();
+	else if (!strcmp(arch, "parisc"))
+		return __perf_reg_ip_parisc();
 
 	pr_err("Fail to find IP register for arch %s, returns 0\n", arch);
 	return 0;
@@ -128,6 +132,8 @@ uint64_t perf_arch_reg_sp(const char *arch)
 		return __perf_reg_sp_s390();
 	else if (!strcmp(arch, "x86"))
 		return __perf_reg_sp_x86();
+	else if (!strcmp(arch, "parisc"))
+		return __perf_reg_sp_parisc();
 
 	pr_err("Fail to find SP register for arch %s, returns 0\n", arch);
 	return 0;
