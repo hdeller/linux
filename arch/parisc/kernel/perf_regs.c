@@ -2,7 +2,6 @@
 #include <linux/perf_event.h>
 #include <linux/perf_regs.h>
 #include <linux/kernel.h>
-#include <linux/errno.h>
 #include <linux/bug.h>
 #include <asm/ptrace.h>
 
@@ -56,13 +55,6 @@ u64 perf_reg_abi(struct task_struct *task)
 void perf_get_regs_user(struct perf_regs *regs_user,
 			struct pt_regs *regs)
 {
-	/*
-	 * Use the regs from the first interruption and let
-	 * perf_sample_regs_intr() handle interrupts (regs == get_irq_regs()).
-	 *
-	 * Also save FPU registers for user-space tasks only.
-	 */
 	regs_user->regs = task_pt_regs(current);
-	// if (user_mode(regs_user->regs)) save_user_fpu_regs();
 	regs_user->abi = perf_reg_abi(current);
 }
