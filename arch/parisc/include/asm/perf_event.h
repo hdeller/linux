@@ -10,8 +10,8 @@
 //
 #define perf_arch_fetch_caller_regs(regs, __ip) { \
 	(regs)->gr[0] = KERNEL_PSW; \
-        (regs)->iaoq[0] = (__ip); \
-        asm volatile("copy %%sp, %0\n":"=r"((regs)->gr[30])); \
+	(regs)->iaoq[0] = (__ip); \
+	asm volatile("copy %%sp, %0\n":"=r"((regs)->gr[30])); \
 }
 
 #endif /* __ASM_PARISC_PERF_EVENT_H */

@@ -28,20 +28,24 @@ void perf_event_print_debug(void)
 	local_irq_restore(flags);
 }
 
-#if 0
 void perf_callchain_kernel(struct perf_callchain_entry_ctx *entry,
 			   struct pt_regs *regs)
 {
-	struct unwind_state state;
-	unsigned long addr;
 
-	unwind_for_each_frame(&state, current, regs, 0) {
-		addr = unwind_get_return_address(&state);
-		if (!addr || perf_callchain_store(entry, addr))
-			return;
+	struct unwind_frame_info info;
+
+	unwind_frame_init_task(&info, current, NULL);
+	while (1) {
+		if (unwind_once(&info) < 0 || info.ip == 0)
+			break;
+
+		if (!__kernel_text_address(info.ip) ||
+			perf_callchain_store(entry, info.ip))
+				return;
 	}
 }
 
+#if 0
 void perf_callchain_user(struct perf_callchain_entry_ctx *entry,
 			 struct pt_regs *regs)
 {
