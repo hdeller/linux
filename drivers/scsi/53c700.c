@@ -4,7 +4,7 @@
  *
  * Copyright (C) 2001 by James.Bottomley@HansenPartnership.com
 **-----------------------------------------------------------------------------
-**  
+**
 **
 **-----------------------------------------------------------------------------
  */
@@ -18,7 +18,7 @@
  *
  * The 700 is the lowliest of the line, it can only do async SCSI.
  * The 700-66 can at least do synchronous SCSI up to 10MHz.
- * 
+ *
  * The 700 chip has no host bus interface logic of its own.  However,
  * it is usually mapped to a location with well defined register
  * offsets.  Therefore, if you can determine the base address and the
@@ -61,7 +61,7 @@
  * consistent memory allocation.
  *
  * Version 2.5
- * 
+ *
  * More Compatibility changes for 710 (now actually works).  Enhanced
  * support for odd clock speeds which constrain SDTR negotiations.
  * correct cacheline separation for scsi messages and status for
@@ -70,7 +70,7 @@
  *
  * Version 2.4
  *
- * Added support for the 53c710 chip (in 53c700 emulation mode only---no 
+ * Added support for the 53c710 chip (in 53c700 emulation mode only---no
  * special 53c710 instructions or registers are used).
  *
  * Version 2.3
@@ -191,7 +191,7 @@ static char *NCR_700_condition[] = {
 	"DISCONNECT_MSG RECEIVED",
 	"MSG_OUT",
 	"DATA_IN",
-	
+
 };
 
 static char *NCR_700_fatal_messages[] = {
@@ -261,7 +261,7 @@ NCR_700_offset_period_to_sxfer(struct NCR_700_Host_Parameters *hostdata,
 static inline __u8
 NCR_700_get_SXFER(struct scsi_device *SDp)
 {
-	struct NCR_700_Host_Parameters *hostdata = 
+	struct NCR_700_Host_Parameters *hostdata =
 		(struct NCR_700_Host_Parameters *)SDp->host->hostdata[0];
 
 	return NCR_700_offset_period_to_sxfer(hostdata,
@@ -360,10 +360,16 @@ NCR_700_detect(struct scsi_host_template *tpnt,
 	for (j = 0; j < ARRAY_SIZE(SCRIPT); j++)
 		script[j] = bS_to_host(SCRIPT[j]);
 
+	printk(KERN_DEBUG "53c700: Script loaded, size=%lu words, script@%p, pScript@0x%08x\n",
+	       (unsigned long)ARRAY_SIZE(SCRIPT), script, (u32)pScript);
+
 	/* adjust all labels to be bus physical */
 	for (j = 0; j < PATCHES; j++)
 		script[LABELPATCHES[j]] = bS_to_host(pScript + SCRIPT[LABELPATCHES[j]]);
+	printk(KERN_DEBUG "53c700: Applied %d label patches\n", PATCHES);
 	/* now patch up fixed addresses. */
+	printk(KERN_DEBUG "53c700: Patching script addresses - MessageLocation@0x%08x, StatusAddress@0x%08x, ReceiveMsgAddress@0x%08x\n",
+	       (u32)(pScript + MSGOUT_OFFSET), (u32)(pScript + STATUS_OFFSET), (u32)(pScript + MSGIN_OFFSET));
 	script_patch_32(hostdata, script, MessageLocation,
 			pScript + MSGOUT_OFFSET);
 	script_patch_32(hostdata, script, StatusAddress,
@@ -384,12 +390,14 @@ NCR_700_detect(struct scsi_host_template *tpnt,
 	hostdata->eh_complete = NULL;
 	host->hostdata[0] = (unsigned long)hostdata;
 	/* kick the chip */
+	printk(KERN_DEBUG "53c700: Initializing chip, writing 0xff to CTEST9_REG\n");
 	NCR_700_writeb(0xff, host, CTEST9_REG);
 	if (hostdata->chip710)
 		hostdata->rev = (NCR_700_readb(host, CTEST8_REG)>>4) & 0x0f;
 	else
 		hostdata->rev = (NCR_700_readb(host, CTEST7_REG)>>4) & 0x0f;
 	hostdata->fast = (NCR_700_readb(host, CTEST9_REG) == 0);
+	printk(KERN_DEBUG "53c700: Chip revision %d, fast=%d\n", hostdata->rev, hostdata->fast);
 	if (banner == 0) {
 		printk(KERN_NOTICE "53c700: Version " NCR_700_VERSION " By James.Bottomley@HansenPartnership.com\n");
 		banner = 1;
@@ -399,6 +407,8 @@ NCR_700_detect(struct scsi_host_template *tpnt,
 	       (hostdata->fast ? "53c700-66" : "53c700"),
 	       hostdata->rev, hostdata->differential ?
 	       "(Differential)" : "");
+	printk(KERN_DEBUG "53c700: Host initialization - base=0x%p, irq=%d, clock=%dMHz\n",
+	       hostdata->base, host->irq, hostdata->clock);
 	/* reset the chip */
 	NCR_700_chip_reset(host);
 
@@ -417,7 +427,7 @@ NCR_700_detect(struct scsi_host_template *tpnt,
 int
 NCR_700_release(struct Scsi_Host *host)
 {
-	struct NCR_700_Host_Parameters *hostdata = 
+	struct NCR_700_Host_Parameters *hostdata =
 		(struct NCR_700_Host_Parameters *)host->hostdata[0];
 
 	if (hostdata->noncoherent)
@@ -450,7 +460,7 @@ NCR_700_identify(int can_disconnect, __u8 lun)
  * Inputs : host - SCSI host */
 static inline int
 NCR_700_data_residual (struct Scsi_Host *host) {
-	struct NCR_700_Host_Parameters *hostdata = 
+	struct NCR_700_Host_Parameters *hostdata =
 		(struct NCR_700_Host_Parameters *)host->hostdata[0];
 	int count, synchronous = 0;
 	unsigned int ddir;
@@ -462,16 +472,16 @@ NCR_700_data_residual (struct Scsi_Host *host) {
 		count = ((NCR_700_readb(host, DFIFO_REG) & 0x3f) -
 			 (NCR_700_readl(host, DBC_REG) & 0x3f)) & 0x3f;
 	}
-	
+
 	if(hostdata->fast)
 		synchronous = NCR_700_readb(host, SXFER_REG) & 0x0f;
-	
+
 	/* get the data direction */
 	ddir = NCR_700_readb(host, CTEST0_REG) & 0x01;
 
 	if (ddir) {
 		/* Receive */
-		if (synchronous) 
+		if (synchronous)
 			count += (NCR_700_readb(host, SSTAT2_REG) & 0xf0) >> 4;
 		else
 			if (NCR_700_readb(host, SSTAT1_REG) & SIDL_REG_FULL)
@@ -501,7 +511,7 @@ sbcl_to_string(__u8 sbcl)
 
 	ret[0]='\0';
 	for(i=0; i<8; i++) {
-		if((1<<i) & sbcl) 
+		if((1<<i) & sbcl)
 			strcat(ret, NCR_700_SBCL_bits[i]);
 	}
 	strcat(ret, NCR_700_SBCL_to_phase[sbcl & 0x07]);
@@ -534,7 +544,7 @@ find_empty_slot(struct NCR_700_Host_Parameters *hostdata)
 	if(slot->state != NCR_700_SLOT_FREE)
 		/* should panic! */
 		printk(KERN_ERR "BUSY SLOT ON FREE LIST!!!\n");
-		
+
 
 	hostdata->free_list = slot->ITL_forw;
 	slot->ITL_forw = NULL;
@@ -547,27 +557,29 @@ find_empty_slot(struct NCR_700_Host_Parameters *hostdata)
 	slot->state = NCR_700_SLOT_BUSY;
 	slot->flags = 0;
 	hostdata->command_slot_count++;
-	
+
 	return slot;
 }
 
-STATIC void 
+STATIC void
 free_slot(struct NCR_700_command_slot *slot,
 	  struct NCR_700_Host_Parameters *hostdata)
 {
+	printk("53c700: >>> free_slot called for slot %p, cmnd=%p\n", slot, slot->cmnd);
 	if((slot->state & NCR_700_SLOT_MASK) != NCR_700_SLOT_MAGIC) {
 		printk(KERN_ERR "53c700: SLOT %p is not MAGIC!!!\n", slot);
 	}
 	if(slot->state == NCR_700_SLOT_FREE) {
 		printk(KERN_ERR "53c700: SLOT %p is FREE!!!\n", slot);
 	}
-	
+
 	slot->resume_offset = 0;
 	slot->cmnd = NULL;
 	slot->state = NCR_700_SLOT_FREE;
 	slot->ITL_forw = hostdata->free_list;
 	hostdata->free_list = slot;
 	hostdata->command_slot_count--;
+	printk("53c700: <<< free_slot completed for slot %p\n", slot);
 }
 
 
@@ -601,6 +613,11 @@ STATIC inline void
 NCR_700_scsi_done(struct NCR_700_Host_Parameters *hostdata,
 	       struct scsi_cmnd *SCp, int result)
 {
+	printk("53c700: >>> NCR_700_scsi_done ENTRY: hostdata->state=%s, hostdata->cmd=%p\n",
+	       hostdata->state == NCR_700_HOST_FREE ? "FREE" :
+	       hostdata->state == NCR_700_HOST_BUSY ? "BUSY" : "UNKNOWN",
+	       hostdata->cmd);
+
 	hostdata->state = NCR_700_HOST_FREE;
 	hostdata->cmd = NULL;
 
@@ -608,11 +625,19 @@ NCR_700_scsi_done(struct NCR_700_Host_Parameters *hostdata,
 		struct NCR_700_command_slot *slot =
 			(struct NCR_700_command_slot *)SCp->host_scribble;
 
+		printk("53c700: SCSI command completed - target %d lun %llu, result=0x%08x\n",
+		       SCp->device->id, SCp->device->lun, result);
+		printk("53c700: Command was: CDB[0]=0x%02x, flags=0x%x, cmd_len=%d\n",
+		       SCp->cmnd[0], slot ? slot->flags : 0, SCp->cmd_len);
+		printk("53c700: Slot details: slot=%p, state=%d, SCp->host_scribble=%p\n",
+		       slot, slot ? slot->state : -1, SCp->host_scribble);
+
 		dma_unmap_single(hostdata->dev, slot->pCmd,
 				 MAX_COMMAND_SIZE, DMA_TO_DEVICE);
 		if (slot->flags == NCR_700_FLAG_AUTOSENSE) {
 			char *cmnd = NCR_700_get_sense_cmnd(SCp->device);
 
+			printk(KERN_DEBUG "53c700: Autosense command completed, original result was 0x%02x\n", cmnd[7]);
 			dma_unmap_single(hostdata->dev, slot->dma_handle,
 					 SCSI_SENSE_BUFFERSIZE, DMA_FROM_DEVICE);
 			/* restore the old result if the request sense was
@@ -635,10 +660,16 @@ NCR_700_scsi_done(struct NCR_700_Host_Parameters *hostdata,
 
 		SCp->host_scribble = NULL;
 		SCp->result = result;
+		printk("53c700: [%lu] About to call scsi_done() for target %d lun %llu, result=0x%08x\n",
+		       jiffies, SCp->device->id, SCp->device->lun, result);
 		scsi_done(SCp);
+		printk("53c700: [%lu] <<< scsi_done() completed for target %d lun %llu\n",
+		       jiffies, SCp->device->id, SCp->device->lun);
 	} else {
+		printk("53c700: NCR_700_scsi_done called with NULL SCp!\n");
 		printk(KERN_ERR "53c700: SCSI DONE HAS NULL SCp\n");
 	}
+	printk("53c700: <<< NCR_700_scsi_done EXIT\n");
 }
 
 
@@ -655,14 +686,20 @@ NCR_700_internal_bus_reset(struct Scsi_Host *host)
 STATIC void
 NCR_700_chip_setup(struct Scsi_Host *host)
 {
-	struct NCR_700_Host_Parameters *hostdata = 
+	struct NCR_700_Host_Parameters *hostdata =
 		(struct NCR_700_Host_Parameters *)host->hostdata[0];
 	__u8 min_period;
 	__u8 min_xferp = (hostdata->chip710 ? NCR_710_MIN_XFERP : NCR_700_MIN_XFERP);
 
+	printk(KERN_DEBUG "53c700: Setting up %s chip (rev %d), clock=%dMHz\n",
+	       hostdata->chip710 ? "53c710" : "53c700", hostdata->rev, hostdata->clock);
+
 	if(hostdata->chip710) {
 		__u8 burst_disable = 0;
 		__u8 burst_length = 0;
+
+		printk(KERN_DEBUG "53c700: Configuring 53c710 mode with burst_length=%d\n",
+		       hostdata->burst_length);
 
 		switch (hostdata->burst_length) {
 			case 1:
@@ -683,6 +720,10 @@ NCR_700_chip_setup(struct Scsi_Host *host)
 		}
 		hostdata->dcntl_extra |= COMPAT_700_MODE;
 
+		printk(KERN_DEBUG "53c700: Writing registers - DCNTL=0x%02x, DMODE=0x%02x, CTEST7=0x%02x\n",
+		       hostdata->dcntl_extra, burst_length | hostdata->dmode_extra,
+		       burst_disable | hostdata->ctest7_extra | (hostdata->differential ? DIFF : 0));
+
 		NCR_700_writeb(hostdata->dcntl_extra, host, DCNTL_REG);
 		NCR_700_writeb(burst_length | hostdata->dmode_extra,
 			       host, DMODE_710_REG);
@@ -693,13 +734,16 @@ NCR_700_chip_setup(struct Scsi_Host *host)
 		NCR_700_writeb(FULL_ARBITRATION | ENABLE_PARITY | PARITY
 			       | AUTO_ATN, host, SCNTL0_REG);
 	} else {
+		printk(KERN_DEBUG "53c700: Configuring 53c700 mode, fast=%d, differential=%d\n",
+		       hostdata->fast, hostdata->differential);
+
 		NCR_700_writeb(BURST_LENGTH_8 | hostdata->dmode_extra,
 			       host, DMODE_700_REG);
-		NCR_700_writeb(hostdata->differential ? 
+		NCR_700_writeb(hostdata->differential ?
 			       DIFF : 0, host, CTEST7_REG);
 		if(hostdata->fast) {
 			/* this is for 700-66, does nothing on 700 */
-			NCR_700_writeb(LAST_DIS_ENBL | ENABLE_ACTIVE_NEGATION 
+			NCR_700_writeb(LAST_DIS_ENBL | ENABLE_ACTIVE_NEGATION
 				       | GENERATE_RECEIVE_PARITY, host,
 				       CTEST8_REG);
 		} else {
@@ -732,7 +776,7 @@ NCR_700_chip_setup(struct Scsi_Host *host)
 		NCR_700_writeb(ASYNC_DIV_3_0 | hostdata->dcntl_extra, host, DCNTL_REG);
 		hostdata->sync_clock = hostdata->clock*2;
 		hostdata->sync_clock /= 3;
-		
+
 	} else if(hostdata->clock > 37 && hostdata->clock <= 50) {
 		/* sync divider 1, async divider 2 */
 		DEBUG(("53c700: sync 1 async 2\n"));
@@ -765,18 +809,22 @@ NCR_700_chip_setup(struct Scsi_Host *host)
 STATIC void
 NCR_700_chip_reset(struct Scsi_Host *host)
 {
-	struct NCR_700_Host_Parameters *hostdata = 
+	struct NCR_700_Host_Parameters *hostdata =
 		(struct NCR_700_Host_Parameters *)host->hostdata[0];
 	if(hostdata->chip710) {
+		printk(KERN_DEBUG "53c700: Issuing 710 software reset via ISTAT_REG\n");
 		NCR_700_writeb(SOFTWARE_RESET_710, host, ISTAT_REG);
 		udelay(100);
 
 		NCR_700_writeb(0, host, ISTAT_REG);
+		printk(KERN_DEBUG "53c700: 710 software reset completed\n");
 	} else {
+		printk(KERN_DEBUG "53c700: Issuing 700 software reset via DCNTL_REG\n");
 		NCR_700_writeb(SOFTWARE_RESET, host, DCNTL_REG);
 		udelay(100);
-		
+
 		NCR_700_writeb(0, host, DCNTL_REG);
+		printk(KERN_DEBUG "53c700: 700 software reset completed\n");
 	}
 
 	mdelay(1000);
@@ -791,7 +839,7 @@ NCR_700_chip_reset(struct Scsi_Host *host)
  * ACK) so that the routine returns correctly to resume its activity
  * */
 STATIC __u32
-process_extended_message(struct Scsi_Host *host, 
+process_extended_message(struct Scsi_Host *host,
 			 struct NCR_700_Host_Parameters *hostdata,
 			 struct scsi_cmnd *SCp, __u32 dsp, __u32 dsps)
 {
@@ -802,6 +850,8 @@ process_extended_message(struct Scsi_Host *host,
 		pun = SCp->device->id;
 		lun = SCp->device->lun;
 	}
+	printk("53c700: Processing message - dsps=0x%08x, msg[0]=0x%02x\n",
+	       dsps, hostdata->msgin[0]);
 
 	switch(hostdata->msgin[2]) {
 	case A_SDTR_MSG:
@@ -817,15 +867,15 @@ process_extended_message(struct Scsi_Host *host,
 
 			spi_offset(starget) = offset;
 			spi_period(starget) = period;
-			
+
 			if(NCR_700_is_flag_set(SCp->device, NCR_700_DEV_PRINT_SYNC_NEGOTIATION)) {
 				spi_display_xfer_agreement(starget);
 				NCR_700_clear_flag(SCp->device, NCR_700_DEV_PRINT_SYNC_NEGOTIATION);
 			}
-			
+
 			NCR_700_set_flag(SCp->device, NCR_700_DEV_NEGOTIATED_SYNC);
 			NCR_700_clear_flag(SCp->device, NCR_700_DEV_BEGIN_SYNC_NEGOTIATION);
-			
+
 			NCR_700_writeb(NCR_700_get_SXFER(SCp->device),
 				       host, SXFER_REG);
 
@@ -842,7 +892,7 @@ process_extended_message(struct Scsi_Host *host,
 			resume_offset = hostdata->pScript + Ent_SendMessageWithATN;
 		}
 		break;
-	
+
 	case A_WDTR_MSG:
 		printk(KERN_INFO "scsi%d: (%d:%d), Unsolicited WDTR after CMD, Rejecting\n",
 		       host->host_no, pun, lun);
@@ -883,6 +933,12 @@ process_message(struct Scsi_Host *host,	struct NCR_700_Host_Parameters *hostdata
 		pun = SCp->device->id;
 		lun = SCp->device->lun;
 	}
+
+	printk(KERN_DEBUG "53c700: Processing message - dsps=0x%08x, msg[0]=0x%02x for target %d lun %d\n",
+	       dsps, hostdata->msgin[0], pun, lun);
+	printk(KERN_DEBUG "53c700: Full message buffer: %02x %02x %02x %02x %02x %02x %02x %02x\n",
+	       hostdata->msgin[0], hostdata->msgin[1], hostdata->msgin[2], hostdata->msgin[3],
+	       hostdata->msgin[4], hostdata->msgin[5], hostdata->msgin[6], hostdata->msgin[7]);
 
 #ifdef NCR_700_DEBUG
 	printk("scsi%d (%d:%d): message %s: ", host->host_no, pun, lun,
@@ -967,12 +1023,22 @@ process_script_interrupt(__u32 dsps, __u32 dsp, struct scsi_cmnd *SCp,
 	__u32 resume_offset = 0;
 	__u8 pun = 0xff, lun=0xff;
 
+	printk("53c700: process_script_interrupt called - DSPS=0x%08x, DSP=0x%08x\n", dsps, dsp);
+
 	if(SCp != NULL) {
 		pun = SCp->device->id;
 		lun = SCp->device->lun;
+		printk("53c700: Processing command for target %d lun %d\n", pun, lun);
+	} else {
+		printk("53c700: Processing interrupt with no active command\n");
+		printk("53c700: WARNING: interrupt with null SCp, dsps=0x%08x\n", dsps);
 	}
 
 	if(dsps == A_GOOD_STATUS_AFTER_STATUS) {
+		printk("53c700: Good status received, status=0x%02x\n", hostdata->status[0]);
+		printk("53c700: GOOD_STATUS_AFTER_STATUS detected - processing command completion\n");
+		printk("53c700: Command completion - status=0x%02x, SCp=%p\n",
+		       hostdata->status[0], SCp);
 		DEBUG(("  COMMAND COMPLETE, status=%02x\n",
 		       hostdata->status[0]));
 		/* OK, if TCQ still under negotiation, we now know it works */
@@ -1066,11 +1132,15 @@ process_script_interrupt(__u32 dsps, __u32 dsp, struct scsi_cmnd *SCp,
 			//		hostdata->tag_negotiated &= ~(1<<scmd_id(SCp));
 			//	}
 			//}
+			printk("53c700: About to call NCR_700_scsi_done for completed command\n");
 			NCR_700_scsi_done(hostdata, SCp, hostdata->status[0]);
+			printk("53c700: NCR_700_scsi_done completed - command should be done\n");
 		}
 	} else if((dsps & 0xfffff0f0) == A_UNEXPECTED_PHASE) {
 		__u8 i = (dsps & 0xf00) >> 8;
 
+		printk("53c700: UNEXPECTED PHASE interrupt - dsps=0x%08x, phase=%s\n",
+		       dsps, NCR_700_phase[i]);
 		scmd_printk(KERN_ERR, SCp, "UNEXPECTED PHASE %s (%s)\n",
 		       NCR_700_phase[i],
 		       sbcl_to_string(NCR_700_readb(host, SBCL_REG)));
@@ -1082,6 +1152,8 @@ process_script_interrupt(__u32 dsps, __u32 dsp, struct scsi_cmnd *SCp,
 	} else if((dsps & 0xfffff000) == A_FATAL) {
 		int i = (dsps & 0xfff);
 
+		printk("53c700: FATAL ERROR interrupt - dsps=0x%08x, error_code=%d\n",
+		       dsps, i);
 		printk(KERN_ERR "scsi%d: (%d:%d) FATAL ERROR: %s\n",
 		       host->host_no, pun, lun, NCR_700_fatal_messages[i]);
 		if(dsps == A_FATAL_ILLEGAL_MSG_LENGTH) {
@@ -1097,6 +1169,7 @@ process_script_interrupt(__u32 dsps, __u32 dsp, struct scsi_cmnd *SCp,
 		       host->host_no, pun, lun,
 		       i, NCR_700_phase[i]);
 #endif
+		printk("53c700: DISCONNECT interrupt - dsps=0x%08x, saving for reselection\n", dsps);
 		save_for_reselection(hostdata, SCp, dsp);
 
 	} else if(dsps == A_RESELECTION_IDENTIFIED) {
@@ -1105,9 +1178,12 @@ process_script_interrupt(__u32 dsps, __u32 dsp, struct scsi_cmnd *SCp,
 		__u8 reselection_id = hostdata->reselection_id;
 		struct scsi_device *SDp;
 
+		printk("53c700: RESELECTION_IDENTIFIED interrupt - reselection_id=%d\n", reselection_id);
+
 		lun = hostdata->msgin[0] & 0x1f;
 
 		hostdata->reselection_id = 0xff;
+		printk("53c700: Reselection by target %d lun %d\n", reselection_id, lun);
 		DEBUG(("scsi%d: (%d:%d) RESELECTED!\n",
 		       host->host_no, reselection_id, lun));
 		/* clear the reselection indicator */
@@ -1122,7 +1198,7 @@ process_script_interrupt(__u32 dsps, __u32 dsp, struct scsi_cmnd *SCp,
 
 			SCp = scsi_host_find_tag(SDp->host, hostdata->msgin[2]);
 			if(unlikely(SCp == NULL)) {
-				printk(KERN_ERR "scsi%d: (%d:%d) no saved request for tag %d\n", 
+				printk(KERN_ERR "scsi%d: (%d:%d) no saved request for tag %d\n",
 				       host->host_no, reselection_id, lun, hostdata->msgin[2]);
 				BUG();
 			}
@@ -1181,7 +1257,7 @@ process_script_interrupt(__u32 dsps, __u32 dsp, struct scsi_cmnd *SCp,
 				       slot->cmnd->cmd_len);
 
 
-			
+
 		}
 	} else if(dsps == A_RESELECTED_DURING_SELECTION) {
 
@@ -1194,10 +1270,10 @@ process_script_interrupt(__u32 dsps, __u32 dsp, struct scsi_cmnd *SCp,
 
 		__u8 reselection_id = NCR_700_readb(host, SFBR_REG);
 		struct NCR_700_command_slot *slot;
-		
+
 		/* Take out our own ID */
 		reselection_id &= ~(1<<host->this_id);
-		
+
 		/* I've never seen this happen, so keep this as a printk rather
 		 * than a debug */
 		printk(KERN_INFO "scsi%d: (%d:%d) RESELECTION DURING SELECTION, dsp=%08x[%04x] state=%d, count=%d\n",
@@ -1223,7 +1299,7 @@ process_script_interrupt(__u32 dsps, __u32 dsp, struct scsi_cmnd *SCp,
 			slot->state = NCR_700_SLOT_QUEUED;
 		}
 		hostdata->cmd = NULL;
-		
+
 		if(reselection_id == 0) {
 			if(hostdata->reselection_id == 0xff) {
 				printk(KERN_ERR "scsi%d: Invalid reselection during selection!!\n", host->host_no);
@@ -1234,7 +1310,7 @@ process_script_interrupt(__u32 dsps, __u32 dsp, struct scsi_cmnd *SCp,
 				reselection_id = hostdata->reselection_id;
 			}
 		} else {
-			
+
 			/* convert to real ID */
 			reselection_id = bitmap_to_number(reselection_id);
 		}
@@ -1252,7 +1328,8 @@ process_script_interrupt(__u32 dsps, __u32 dsp, struct scsi_cmnd *SCp,
 		 * a return here will re-run the queued command slot
 		 * that may have been interrupted by the initial selection */
 		DEBUG((" SELECTION COMPLETED\n"));
-	} else if((dsps & 0xfffff0f0) == A_MSG_IN) { 
+	} else if((dsps & 0xfffff0f0) == A_MSG_IN) {
+		printk("53c700: MESSAGE IN interrupt - dsps=0x%08x, calling process_message\n", dsps);
 		resume_offset = process_message(host, hostdata, SCp,
 						dsp, dsps);
 	} else if((dsps &  0xfffff000) == 0) {
@@ -1274,10 +1351,13 @@ process_script_interrupt(__u32 dsps, __u32 dsp, struct scsi_cmnd *SCp,
 		       host->host_no, pun, lun, dsps & 0xfff, dsp, dsp - hostdata->pScript);
 		resume_offset = dsp;
 	} else {
+		printk("53c700: UNKNOWN SCRIPT INTERRUPT - dsps=0x%08x, dsp=0x%08x (offset=0x%04x)\n",
+		       dsps, dsp, dsp - hostdata->pScript);
 		printk(KERN_ERR "scsi%d: (%d:%d), unidentified script interrupt 0x%x at %04x\n",
 		       host->host_no, pun, lun, dsps, dsp - hostdata->pScript);
 		NCR_700_internal_bus_reset(host);
 	}
+	printk("53c700: process_script_interrupt returning resume_offset=0x%08x\n", resume_offset);
 	return resume_offset;
 }
 
@@ -1305,7 +1385,7 @@ process_selection(struct Scsi_Host *host, __u32 dsp)
 
 		/* Take out our own ID */
 		id &= ~(1<<host->this_id);
-		if(id != 0) 
+		if(id != 0)
 			break;
 		udelay(5);
 	}
@@ -1323,7 +1403,7 @@ process_selection(struct Scsi_Host *host, __u32 dsp)
 		struct NCR_700_command_slot *slot =
 			(struct NCR_700_command_slot *)SCp->host_scribble;
 		DEBUG(("  ID %d WARNING: RESELECTION OF BUSY HOST, saving cmd %p, slot %p, addr %x [%04x], resume %x!\n", id, hostdata->cmd, slot, dsp, dsp - hostdata->pScript, resume_offset));
-		
+
 		switch(dsp - hostdata->pScript) {
 		case Ent_Disconnect1:
 		case Ent_Disconnect2:
@@ -1345,7 +1425,7 @@ process_selection(struct Scsi_Host *host, __u32 dsp)
 		case Ent_Finish2:
 			process_script_interrupt(A_GOOD_STATUS_AFTER_STATUS, dsp, SCp, host, hostdata);
 			break;
-			
+
 		default:
 			slot->state = NCR_700_SLOT_QUEUED;
 			break;
@@ -1407,16 +1487,21 @@ NCR_700_start_command(struct scsi_cmnd *SCp)
 	__u16 count = 1;	/* for IDENTIFY message */
 	u8 lun = SCp->device->lun;
 
+	printk("53c700: Starting command for target %d lun %d, CDB[0]=0x%02x\n",
+	       SCp->device->id, lun, SCp->cmnd[0]);
+
 	if(hostdata->state != NCR_700_HOST_FREE) {
 		/* keep this inside the lock to close the race window where
 		 * the running command finishes on another CPU while we don't
 		 * change the state to queued on this one */
 		slot->state = NCR_700_SLOT_QUEUED;
 
+		printk("53c700: Host busy, queueing command\n");
 		DEBUG(("scsi%d: host busy, queueing command %p, slot %p\n",
 		       SCp->device->host->host_no, slot->cmnd, slot));
 		return 0;
 	}
+	printk("53c700: Host free, starting command immediately\n");
 	hostdata->state = NCR_700_HOST_BUSY;
 	hostdata->cmd = SCp;
 	slot->state = NCR_700_SLOT_BUSY;
@@ -1454,6 +1539,14 @@ NCR_700_start_command(struct scsi_cmnd *SCp)
 
 	script_patch_16(hostdata, hostdata->script, MessageCount, count);
 
+	printk("53c700: Script patching details:\n");
+	printk("53c700:   MessageCount=%d, Device_ID=0x%02x (target %d)\n",
+	       count, 1<<scmd_id(SCp), scmd_id(SCp));
+	printk("53c700:   Command: pCmd=0x%08x, cmd_len=%d, CDB[0]=0x%02x\n",
+	       slot->pCmd, SCp->cmd_len, SCp->cmnd[0]);
+	printk("53c700:   SG: pSG=0x%08x, sg_count=%d\n",
+	       to32bit(&slot->pSG[0].ins), SCp->sc_data_direction != DMA_NONE ? scsi_sg_count(SCp) : 0);
+
 	script_patch_ID(hostdata, hostdata->script, Device_ID, 1<<scmd_id(SCp));
 
 	script_patch_32_abs(hostdata, hostdata->script, CommandAddress,
@@ -1478,6 +1571,39 @@ NCR_700_start_command(struct scsi_cmnd *SCp)
 		       SCp->device->host, SXFER_REG);
 	NCR_700_writel(slot->temp, SCp->device->host, TEMP_REG);
 	NCR_700_writel(slot->resume_offset, SCp->device->host, DSP_REG);
+	printk("53c700: Starting script execution! DSP=0x%08x (offset=0x%04x), temp=0x%08x\n",
+	       slot->resume_offset, slot->resume_offset - hostdata->pScript, slot->temp);
+	printk("53c700: SXFER=0x%02x, msgout[0]=0x%02x, cmd_len=%d\n",
+	       NCR_700_get_SXFER(SCp->device), hostdata->msgout[0], SCp->cmd_len);
+
+	/* DEBUG: Check chip state immediately after starting script */
+	{
+		__u8 istat_check = NCR_700_readb(SCp->device->host, ISTAT_REG);
+		__u8 dstat_check = NCR_700_readb(SCp->device->host, DSTAT_REG);
+		__u8 sstat0_check = NCR_700_readb(SCp->device->host, SSTAT0_REG);
+		__u8 sstat1_check = NCR_700_readb(SCp->device->host, SSTAT1_REG);
+		__u32 dsp_check = NCR_700_readl(SCp->device->host, DSP_REG);
+		__u32 dsps_check = NCR_700_readl(SCp->device->host, DSPS_REG);
+		__u8 scntl1_check = NCR_700_readb(SCp->device->host, SCNTL1_REG);
+
+		printk("53c700: POST-START CHIP STATE: istat=0x%02x dstat=0x%02x sstat0=0x%02x sstat1=0x%02x\n",
+		       istat_check, dstat_check, sstat0_check, sstat1_check);
+		printk("53c700: POST-START REGS: dsp=0x%08x dsps=0x%08x scntl1=0x%02x\n",
+		       dsp_check, dsps_check, scntl1_check);
+		printk("53c700: DSP CHANGED: %s (expected: 0x%08x, actual: 0x%08x)\n",
+		       (dsp_check != slot->resume_offset) ? "YES - SCRIPT EXECUTING" : "NO - SCRIPT NOT STARTED",
+		       slot->resume_offset, dsp_check);
+
+		/* Wait a tiny bit and check again to see if script makes progress */
+		// udelay(10);
+		// {
+		// 	__u32 dsp_check2 = NCR_700_readl(SCp->device->host, DSP_REG);
+		// 	__u8 istat_check2 = NCR_700_readb(SCp->device->host, ISTAT_REG);
+		// 	printk("53c700: AFTER 10us: dsp=0x%08x istat=0x%02x %s\n",
+		// 	       dsp_check2, istat_check2,
+		// 	       (dsp_check2 != dsp_check) ? "SCRIPT PROGRESSING" : "SCRIPT STUCK");
+		// }
+	}
 
 	return 1;
 }
@@ -1507,22 +1633,28 @@ NCR_700_intr(int irq, void *dev_id)
 		__u32 dsp;
 		struct scsi_cmnd *SCp = hostdata->cmd;
 
+		printk("53c700: Interrupt triggered! istat=0x%02x\n", istat);
 		handled = 1;
 
 		if(istat & SCSI_INT_PENDING) {
 			udelay(10);
 
 			sstat0 = NCR_700_readb(host, SSTAT0_REG);
+			printk("53c700: SCSI interrupt pending, sstat0=0x%02x\n", sstat0);
 		}
 
 		if(istat & DMA_INT_PENDING) {
 			udelay(10);
 
 			dstat = NCR_700_readb(host, DSTAT_REG);
+			printk("53c700: DMA interrupt pending, dstat=0x%02x\n", dstat);
 		}
 
 		dsps = NCR_700_readl(host, DSPS_REG);
 		dsp = NCR_700_readl(host, DSP_REG);
+
+		printk("53c700: Script execution - DSP=0x%08x (offset=0x%04x), DSPS=0x%08x\n",
+		       dsp, (dsp - (__u32)(hostdata->pScript))/4, dsps);
 
 		DEBUG(("scsi%d: istat %02x sstat0 %02x dstat %02x dsp %04x[%08x] dsps 0x%x\n",
 		       host->host_no, istat, sstat0, dstat,
@@ -1548,7 +1680,7 @@ NCR_700_intr(int irq, void *dev_id)
 			/* clear all the negotiated parameters */
 			__shost_for_each_device(SDp, host)
 				NCR_700_clear_flag(SDp, ~0);
-			
+
 			/* clear all the slots and their pending commands */
 			for(i = 0; i < NCR_700_COMMAND_SLOTS_PER_HOST; i++) {
 				struct scsi_cmnd *SCp;
@@ -1557,7 +1689,7 @@ NCR_700_intr(int irq, void *dev_id)
 
 				if(slot->state == NCR_700_SLOT_FREE)
 					continue;
-				
+
 				SCp = slot->cmnd;
 				printk(KERN_ERR " failing command because of reset, slot %p, cmnd %p\n",
 				       slot, SCp);
@@ -1583,10 +1715,20 @@ NCR_700_intr(int irq, void *dev_id)
 				complete(hostdata->eh_complete);
 			goto out_unlock;
 		} else if(sstat0 & SELECTION_TIMEOUT) {
+			printk("53c700: SELECTION TIMEOUT - target %d did not respond\n", pun);
 			DEBUG(("scsi%d: (%d:%d) selection timeout\n",
 			       host->host_no, pun, lun));
 			NCR_700_scsi_done(hostdata, SCp, DID_NO_CONNECT<<16);
 		} else if(sstat0 & PHASE_MISMATCH) {
+			__u8 sbcl = NCR_700_readb(host, SBCL_REG);
+			__u32 dbc = NCR_700_readl(host, DBC_REG);
+			__u32 dnad = NCR_700_readl(host, DNAD_REG);
+
+			printk(KERN_DEBUG "53c700: PHASE MISMATCH detected - dsp=0x%08x, expected phase, actual phase=%s\n",
+			       dsp, sbcl_to_string(sbcl));
+			printk(KERN_DEBUG "53c700: Phase mismatch details - DBC=0x%08x, DNAD=0x%08x, SBCL=0x%02x\n",
+			       dbc, dnad, sbcl);
+
 			struct NCR_700_command_slot *slot = (SCp == NULL) ? NULL :
 				(struct NCR_700_command_slot *)SCp->host_scribble;
 
@@ -1621,7 +1763,7 @@ NCR_700_intr(int irq, void *dev_id)
 				data_transfer += residual;
 
 				if(data_transfer != 0) {
-					int count; 
+					int count;
 					__u32 pAddr;
 
 					SGcount--;
@@ -1658,36 +1800,46 @@ NCR_700_intr(int irq, void *dev_id)
 			}
 
 		} else if(sstat0 & SCSI_GROSS_ERROR) {
+			printk("53c700: SCSI GROSS ERROR detected\n");
 			printk(KERN_ERR "scsi%d: (%d:%d) GROSS ERROR\n",
 			       host->host_no, pun, lun);
 			NCR_700_scsi_done(hostdata, SCp, DID_ERROR<<16);
 		} else if(sstat0 & PARITY_ERROR) {
+			printk("53c700: PARITY ERROR detected\n");
 			printk(KERN_ERR "scsi%d: (%d:%d) PARITY ERROR\n",
 			       host->host_no, pun, lun);
 			NCR_700_scsi_done(hostdata, SCp, DID_ERROR<<16);
 		} else if(dstat & SCRIPT_INT_RECEIVED) {
+			printk("53c700: SCRIPT INTERRUPT received, calling process_script_interrupt\n");
+			printk("53c700: Script interrupt details: dsps=0x%08x, dsp=0x%08x, SCp=%p\n",
+			       dsps, dsp, SCp);
 			DEBUG(("scsi%d: (%d:%d) ====>SCRIPT INTERRUPT<====\n",
 			       host->host_no, pun, lun));
 			resume_offset = process_script_interrupt(dsps, dsp, SCp, host, hostdata);
+			printk("53c700: process_script_interrupt returned resume_offset=0x%08x\n",
+			       resume_offset);
 		} else if(dstat & (ILGL_INST_DETECTED)) {
+			printk("53c700: ILLEGAL INSTRUCTION detected at DSP=0x%08x\n", dsp);
 			printk(KERN_ERR "scsi%d: (%d:%d) Illegal Instruction detected at 0x%08x[0x%x]!!!\n"
 			       "         Please email James.Bottomley@HansenPartnership.com with the details\n",
 			       host->host_no, pun, lun,
 			       dsp, dsp - hostdata->pScript);
 			NCR_700_scsi_done(hostdata, SCp, DID_ERROR<<16);
 		} else if(dstat & (WATCH_DOG_INTERRUPT|ABORTED)) {
+			printk("53c700: DMA WATCHDOG/ABORTED interrupt, dstat=0x%02x\n", dstat);
 			printk(KERN_ERR "scsi%d: (%d:%d) serious DMA problem, dstat=%02x\n",
 			       host->host_no, pun, lun, dstat);
 			NCR_700_scsi_done(hostdata, SCp, DID_ERROR<<16);
 		}
 
-		
+
 		/* NOTE: selection interrupt processing MUST occur
 		 * after script interrupt processing to correctly cope
 		 * with the case where we process a disconnect and
 		 * then get reselected before we process the
 		 * disconnection */
 		if(sstat0 & SELECTED) {
+			printk("53c700: SELECTED interrupt - processing selection\n");
 			/* FIXME: It currently takes at least FOUR
 			 * interrupts to complete a command that
 			 * disconnects: one for the disconnect, one
@@ -1707,6 +1859,21 @@ NCR_700_intr(int irq, void *dev_id)
 
 		}
 
+	} else {
+		/* No interrupt pending - check if we should be getting one */
+		if(hostdata->state == NCR_700_HOST_BUSY && hostdata->cmd) {
+			__u32 dsp_current = NCR_700_readl(host, DSP_REG);
+			__u8 istat_current = NCR_700_readb(host, ISTAT_REG);
+			static unsigned long last_debug_time = 0;
+
+			/* Rate limit this debug output to avoid spam */
+			if (time_after(jiffies, last_debug_time + HZ)) {
+				printk("53c700: NO INTERRUPT - host busy but no interrupt pending\n");
+				printk("53c700: Current DSP=0x%08x, ISTAT=0x%02x, cmd=%p\n",
+				       dsp_current, istat_current, hostdata->cmd);
+				last_debug_time = jiffies;
+			}
+		}
 	}
 
 	if(resume_offset) {
@@ -1717,9 +1884,17 @@ NCR_700_intr(int irq, void *dev_id)
 		}
 
 		DEBUG(("Attempting to resume at %x\n", resume_offset));
+		printk("53c700: Resuming script execution at 0x%08x (offset 0x%04x)\n",
+		       resume_offset, resume_offset - hostdata->pScript);
 		NCR_700_clear_fifo(host);
 		NCR_700_writel(resume_offset, host, DSP_REG);
-	} 
+		printk("53c700: Script resumed - DSP register set to 0x%08x\n", resume_offset);
+	} else {
+		printk("53c700: No resume_offset - interrupt processing complete\n");
+		printk("53c700: Host state after interrupt: %s\n",
+		       hostdata->state == NCR_700_HOST_FREE ? "FREE" :
+		       hostdata->state == NCR_700_HOST_BUSY ? "BUSY" : "UNKNOWN");
+	}
 	/* There is probably a technical no-no about this: If we're a
 	 * shared interrupt and we got this interrupt because the
 	 * other device needs servicing not us, we're still going to
@@ -1733,7 +1908,7 @@ NCR_700_intr(int irq, void *dev_id)
 			 * position we left off */
 			int j = (i + hostdata->saved_slot_position)
 				% NCR_700_COMMAND_SLOTS_PER_HOST;
-			
+
 			if(hostdata->slots[j].state != NCR_700_SLOT_QUEUED)
 				continue;
 			if(NCR_700_start_command(hostdata->slots[j].cmnd)) {
@@ -1753,10 +1928,13 @@ NCR_700_intr(int irq, void *dev_id)
 
 static int NCR_700_queuecommand_lck(struct scsi_cmnd *SCp)
 {
-	struct NCR_700_Host_Parameters *hostdata = 
+	struct NCR_700_Host_Parameters *hostdata =
 		(struct NCR_700_Host_Parameters *)SCp->device->host->hostdata[0];
 	__u32 move_ins;
 	struct NCR_700_command_slot *slot;
+
+	printk("53c700: [%lu] Queueing command for target %d lun %llu, CDB[0]=0x%02x\n",
+	       jiffies, SCp->device->id, SCp->device->lun, SCp->cmnd[0]);
 
 	if(hostdata->command_slot_count >= NCR_700_COMMAND_SLOTS_PER_HOST) {
 		/* We're over our allocation, this should never happen
@@ -1792,6 +1970,7 @@ static int NCR_700_queuecommand_lck(struct scsi_cmnd *SCp)
 	slot->cmnd = SCp;
 
 	SCp->host_scribble = (unsigned char *)slot;
+	printk("53c700: Command queued in slot %p, SCp->host_scribble=%p\n", slot, SCp->host_scribble);
 
 #ifdef NCR_700_DEBUG
 	printk("53c700: scsi%d, command ", SCp->device->host->host_no);
@@ -1853,7 +2032,7 @@ static int NCR_700_queuecommand_lck(struct scsi_cmnd *SCp)
 		default:
 			printk(KERN_ERR "53c700: Unknown command for data direction ");
 			scsi_print_command(SCp);
-			
+
 			move_ins = 0;
 			break;
 		case DMA_NONE:
@@ -1908,14 +2087,54 @@ STATIC int
 NCR_700_abort(struct scsi_cmnd * SCp)
 {
 	struct NCR_700_command_slot *slot;
+	struct NCR_700_Host_Parameters *hostdata =
+		(struct NCR_700_Host_Parameters *)SCp->device->host->hostdata[0];
 
 	scmd_printk(KERN_INFO, SCp, "abort command\n");
 
+	/* DEBUG: Dump detailed state when abort is called */
+	printk("53c700: [%lu] ABORT called for target %d lun %llu, CDB[0]=0x%02x\n",
+	       jiffies, SCp->device->id, SCp->device->lun, SCp->cmnd[0]);
+	printk("53c700: ABORT timing - SCp=%p, SCp->host_scribble=%p\n",
+	       SCp, SCp->host_scribble);
+
+	{
+		__u8 istat = NCR_700_readb(SCp->device->host, ISTAT_REG);
+		__u8 dstat = NCR_700_readb(SCp->device->host, DSTAT_REG);
+		__u8 sstat0 = NCR_700_readb(SCp->device->host, SSTAT0_REG);
+		__u8 sstat1 = NCR_700_readb(SCp->device->host, SSTAT1_REG);
+		__u32 dsp = NCR_700_readl(SCp->device->host, DSP_REG);
+		__u32 dsps = NCR_700_readl(SCp->device->host, DSPS_REG);
+		__u32 dbc = NCR_700_readl(SCp->device->host, DBC_REG) & 0x00ffffff;
+		__u8 sbcl = NCR_700_readb(SCp->device->host, SBCL_REG);
+
+		printk("53c700: ABORT CHIP STATE: istat=0x%02x dstat=0x%02x sstat0=0x%02x sstat1=0x%02x\n",
+		       istat, dstat, sstat0, sstat1);
+		printk("53c700: ABORT REGS: dsp=0x%08x (offset=0x%04x) dsps=0x%08x dbc=0x%06x\n",
+		       dsp, dsp - hostdata->pScript, dsps, dbc);
+		printk("53c700: ABORT SCSI: sbcl=0x%02x (bus phase)\n", sbcl);
+		printk("53c700: HOST STATE: %s, cmd=%p\n",
+		       hostdata->state == NCR_700_HOST_FREE ? "FREE" :
+		       hostdata->state == NCR_700_HOST_BUSY ? "BUSY" : "UNKNOWN",
+		       hostdata->cmd);
+		printk("53c700: ABORT - hostdata->cmd comparison: hostdata->cmd=%p, SCp=%p, %s\n",
+		       hostdata->cmd, SCp, hostdata->cmd == SCp ? "MATCH" : "MISMATCH");
+	}
+
 	slot = (struct NCR_700_command_slot *)SCp->host_scribble;
 
-	if(slot == NULL)
+	if(slot == NULL) {
 		/* no outstanding command to abort */
+		printk("53c700: ABORT - no slot found for command (SCp->host_scribble is NULL)\n");
+		printk("53c700: ABORT - this suggests command already completed and cleaned up\n");
 		return SUCCESS;
+	}
+
+	printk("53c700: ABORT - found slot %p, state=%d\n", slot, slot->state);
+	printk("53c700: ABORT - slot->cmnd=%p, slot->flags=0x%x\n", slot->cmnd, slot->flags);
+	printk("53c700: ABORT - CRITICAL: slot->cmnd == SCp? %s\n",
+	       slot->cmnd == SCp ? "YES" : "NO");
+
 	if(SCp->cmnd[0] == TEST_UNIT_READY) {
 		/* FIXME: This is because of a problem in the new
 		 * error handler.  When it is in error recovery, it
@@ -1938,7 +2157,7 @@ STATIC int
 NCR_700_host_reset(struct scsi_cmnd * SCp)
 {
 	DECLARE_COMPLETION_ONSTACK(complete);
-	struct NCR_700_Host_Parameters *hostdata = 
+	struct NCR_700_Host_Parameters *hostdata =
 		(struct NCR_700_Host_Parameters *)SCp->device->host->hostdata[0];
 
 	scmd_printk(KERN_INFO, SCp,
@@ -1976,9 +2195,9 @@ STATIC void
 NCR_700_set_period(struct scsi_target *STp, int period)
 {
 	struct Scsi_Host *SHp = dev_to_shost(STp->dev.parent);
-	struct NCR_700_Host_Parameters *hostdata = 
+	struct NCR_700_Host_Parameters *hostdata =
 		(struct NCR_700_Host_Parameters *)SHp->hostdata[0];
-	
+
 	if(!hostdata->fast)
 		return;
 
@@ -1995,11 +2214,11 @@ STATIC void
 NCR_700_set_offset(struct scsi_target *STp, int offset)
 {
 	struct Scsi_Host *SHp = dev_to_shost(STp->dev.parent);
-	struct NCR_700_Host_Parameters *hostdata = 
+	struct NCR_700_Host_Parameters *hostdata =
 		(struct NCR_700_Host_Parameters *)SHp->hostdata[0];
 	int max_offset = hostdata->chip710
 		? NCR_710_MAX_OFFSET : NCR_700_MAX_OFFSET;
-	
+
 	if(!hostdata->fast)
 		return;
 
@@ -2032,23 +2251,36 @@ NCR_700_sdev_init(struct scsi_device *SDp)
 STATIC int
 NCR_700_sdev_configure(struct scsi_device *SDp, struct queue_limits *lim)
 {
-	struct NCR_700_Host_Parameters *hostdata = 
+	struct NCR_700_Host_Parameters *hostdata =
 		(struct NCR_700_Host_Parameters *)SDp->host->hostdata[0];
+
+	printk(KERN_DEBUG "53c700: Configuring device %d:%llu - tagged_supported=%d, fast=%d\n",
+	       SDp->id, SDp->lun, SDp->tagged_supported, hostdata->fast);
 
 	/* to do here: allocate memory; build a queue_full list */
 	if(SDp->tagged_supported) {
 		scsi_change_queue_depth(SDp, NCR_700_DEFAULT_TAGS);
 		NCR_700_set_tag_neg_state(SDp, NCR_700_START_TAG_NEGOTIATION);
+		printk(KERN_DEBUG "53c700: Device %d:%llu enabled for tagged queuing, queue depth=%d\n",
+		       SDp->id, SDp->lun, NCR_700_DEFAULT_TAGS);
 	}
 
 	if(hostdata->fast) {
+		printk(KERN_DEBUG "53c700: Device %d:%llu starting domain validation (fast scsi enabled)\n",
+		       SDp->id, SDp->lun);
 		/* Find the correct offset and period via domain validation */
 		if (!spi_initial_dv(SDp->sdev_target))
 			spi_dv_device(SDp);
 	} else {
+		printk(KERN_DEBUG "53c700: Device %d:%llu configured for async operation (fast scsi disabled)\n",
+		       SDp->id, SDp->lun);
 		spi_offset(SDp->sdev_target) = 0;
 		spi_period(SDp->sdev_target) = 0;
 	}
+
+	printk(KERN_DEBUG "53c700: Final config for device %d:%llu - period=%d, offset=%d\n",
+	       SDp->id, SDp->lun, spi_period(SDp->sdev_target), spi_offset(SDp->sdev_target));
+
 	return 0;
 }
 
@@ -2072,7 +2304,7 @@ NCR_700_show_active_tags(struct device *dev, struct device_attribute *attr, char
 {
 	struct scsi_device *SDp = to_scsi_device(dev);
 
-	return sysfs_emit(buf, "%d\n", NCR_700_get_depth(SDp));
+	return snprintf(buf, 20, "%d\n", NCR_700_get_depth(SDp));
 }
 
 static struct device_attribute NCR_700_active_tags_attr = {
