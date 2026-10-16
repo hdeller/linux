@@ -476,8 +476,7 @@ static bool newport_switch(struct vc_data *vc)
 	return true;
 }
 
-static bool newport_blank(struct vc_data *c, enum vesa_blank_mode blank,
-			  bool mode_switch)
+static bool newport_blank(struct vc_data *c, enum vesa_blank_mode blank)
 {
 	unsigned short treg;
 

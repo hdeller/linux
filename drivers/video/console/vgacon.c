@@ -797,15 +797,16 @@ static void vga_pal_blank(struct vgastate *state)
 	}
 }
 
-static bool vgacon_blank(struct vc_data *c, enum vesa_blank_mode blank,
-			 bool mode_switch)
+static bool vgacon_blank(struct vc_data *c, enum vesa_blank_mode blank)
 {
+	bool mode_switch = !vga_is_gfx && c->vc_mode == KD_GRAPHICS;
+
 	if (mode_switch)
 		vga_is_gfx = true;
 
 	switch (blank) {
 	case VESA_NO_BLANKING:	/* Normal blanking */
-		if (!mode_switch && vga_video_type == VIDEO_TYPE_VGAC) {
+		if (c->vc_mode == KD_TEXT && vga_video_type == VIDEO_TYPE_VGAC) {
 			vga_pal_blank(&vgastate);
 			vga_palette_blanked = true;
 			return false;

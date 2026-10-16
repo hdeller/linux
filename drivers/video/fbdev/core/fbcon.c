@@ -2288,11 +2288,11 @@ static void fbcon_generic_blank(struct vc_data *vc, struct fb_info *info,
 	}
 }
 
-static bool fbcon_blank(struct vc_data *vc, enum vesa_blank_mode blank,
-			bool mode_switch)
+static bool fbcon_blank(struct vc_data *vc, enum vesa_blank_mode blank)
 {
 	struct fb_info *info = fbcon_info_from_console(vc->vc_num);
 	struct fbcon_par *par = info->fbcon_par;
+	bool mode_switch = !par->graphics && vc->vc_mode == KD_GRAPHICS;
 
 	if (mode_switch)
 		par->graphics = true;

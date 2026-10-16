@@ -56,8 +56,8 @@ enum vc_intensity;
  * @con_switch: notifier about the console switch; it is supposed to return
  *		true if a redraw is needed.
  * @con_blank:  blank the console. The preferred VESA blank mode is passed in
- *		@blank. @mode_switch is set if changing from/to text/graphics.
- *		The hook is supposed to return true if a redraw is needed.
+ *		@blank. The hook is supposed to return true if a redraw is
+ *		needed.
  * @con_unblank:  unblank the console. The hook is supposed to return true if
  *		a redraw is needed.
  * @con_font_set: set console @vc font to @font with height @vpitch. @flags can
@@ -99,8 +99,7 @@ struct consw {
 			unsigned int bottom, enum con_scroll dir,
 			unsigned int lines);
 	bool	(*con_switch)(struct vc_data *vc);
-	bool	(*con_blank)(struct vc_data *vc, enum vesa_blank_mode blank,
-			     bool mode_switch);
+	bool	(*con_blank)(struct vc_data *vc, enum vesa_blank_mode blank);
 	bool	(*con_unblank)(struct vc_data *vc);
 	int	(*con_font_set)(struct vc_data *vc,
 				const struct console_font *font,

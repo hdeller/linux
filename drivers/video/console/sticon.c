@@ -299,9 +299,10 @@ static bool sticon_switch(struct vc_data *conp)
     return true;	/* needs refreshing */
 }
 
-static bool sticon_blank(struct vc_data *c, enum vesa_blank_mode blank,
-			 bool mode_switch)
+static bool sticon_blank(struct vc_data *c, enum vesa_blank_mode blank)
 {
+	bool mode_switch = !vga_is_gfx && c->vc_mode == KD_GRAPHICS;
+
 	sti_clear(sticon_sti, 0, 0, c->vc_rows, c->vc_cols, BLANK, font_data[c->vc_num]);
 
 	if (mode_switch)
